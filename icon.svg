@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Access permission levels">
-  <path d="M32 4 8 13v18c0 14 10 25 24 29 14-4 24-15 24-29V13L32 4Z" fill="#1f6feb"/>
-  <path d="M32 10 14 17v14c0 11 7.6 20 18 23.5C42.4 51 50 42 50 31V17L32 10Z" fill="#0b3d91"/>
-  <path d="M22 30h20v14H22z" fill="#f0f6ff"/>
-  <path d="M26 30v-4a6 6 0 0 1 12 0v4h-3.5v-4a2.5 2.5 0 0 0-5 0v4H26Z" fill="#f0f6ff"/>
-  <circle cx="32" cy="37" r="2.4" fill="#0b3d91"/>
-</svg>
