@@ -6,9 +6,14 @@
 
 ### Added
 - `LICENSE`：MIT。`package.json` 补 `license`、`engines.node >= 22`、`keywords`，`files` 收录 `LICENSE`。
-- 文档中的本机绝对路径全部替换为占位符（`<repo-path>`、`<profile-dir>`、`<dsh-dir>`、`<selftest-dir>`、`~`），
+- 文档中的本机绝对路径全部替换为占位符（`<repo-path>`、`<profile-dir>`、`<dsh-dir>`、`~`），
   测试夹具路径改为与具体机器无关的形式。
 - README/配置文档标明已测试版本：DSH `0.2.1-alpha.1`（主力）与 `0.2.2-rc.3`（组合配置+启动验证）。
+
+### Changed
+- 六套自检从开发目录迁入 `test/`：路径由 `import.meta.url` 推出，夹具改用仓库内 `test/fixtures/`
+  （已进 `.gitignore`），宿主相关用例可用 `AP_DSH_DIR` 指定 checkout、缺失时自动跳过；新增
+  `test/run-all.mjs` 与 `npm test` 一次跑完七套。`LICENSE` 署名改为 `kerzeftu`，`package.json` 补 `author`。
 
 ### Fixed
 - `isUrlLike()` 把 `file://…` 也当远程地址，导致 `curl file:///etc/passwd` 这类本地读取在判定里“不涉及路径”；

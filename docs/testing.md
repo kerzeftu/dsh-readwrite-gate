@@ -5,9 +5,10 @@
 | 位置 | 内容 | 跑法 |
 |------|------|------|
 | `test/delegation.test.mjs` | 随包测试：委派继承、写切片、解析边角（`file://`、箭头函数、`2>&1`） | `node test/delegation.test.mjs` |
-| `<selftest-dir>/` | 开发期六套自检，覆盖宿主行为、界面、座位、文档一致性 | `node check-*.mjs` |
+| `test/check-*.mjs` | 六套自检，覆盖宿主行为、界面、座位、文档一致性 | `npm test` |
 
-六套自检是开发资产，不在 npm 包里（依赖宿主 checkout 与测试桩）。
+六套自检是开发资产，依赖宿主 checkout（仅 `check-seat.mjs` 的宿主契约段需要；没有 checkout 时自动跳过）
+与各脚本自带的测试桩，因此**不随 npm 包发布**。
 
 ## 六套自检各测什么
 
@@ -23,13 +24,14 @@
 跑法：
 
 ```bash
-cd <selftest-dir>
-for f in check-locale check-panel check-menu check-visual check-gate check-seat; do
-  printf '%-14s ' "$f"; node "$f.mjs" 2>&1 | tail -1
-done
+npm test                  # test/run-all.mjs：七套一次跑完并汇总
+# 或单跑一套
+node test/check-gate.mjs
 ```
 
-`check-gate.mjs` 会打印总断言数（当前 284）。`check-visual.mjs` 支持 `AP_CLIENT=<file>` 指定被测客户端文件，负向对照靠它。
+`check-gate.mjs` 会打印总断言数（当前 284）。`check-visual.mjs` / `check-locale.mjs` / `check-seat.mjs`
+支持 `AP_CLIENT=<file>` 指定被测客户端文件，负向对照靠它；`check-seat.mjs` 用 `AP_DSH_DIR` 指向要对照的
+DSH checkout（默认 `~/.dsh-versions/0.2.1-alpha.1`）。夹具目录 `test/fixtures/` 由用例自建，已进 `.gitignore`。
 
 ## 加断言的规矩
 

@@ -23,7 +23,7 @@
 约定：
 
 占位符：`<repo-path>` 是本仓库的绝对路径，`<profile-dir>` 是 Harness profile 目录，
-`<dsh-dir>` 是某个 DSH 版本目录，`<selftest-dir>` 是开发期自检脚本目录（不在仓库内）；`~` 指当前用户主目录。
+`<dsh-dir>` 是某个 DSH 版本目录；`~` 指当前用户主目录。（六套自检已迁入仓库的 `test/`，不再需要单独的自检目录占位符。）
 
 
 - 文档里出现的路径都相对仓库根目录；`index.js` / `functions.js` / `client.js` / `cordis.patch.yml` 指仓库根下的同名文件。

@@ -15,8 +15,8 @@
 └── CHANGELOG.md
 ```
 
-六套自检脚本**不在包里**，在 `<selftest-dir>/`（见 [testing.md](testing.md)）：
-它们是开发期资产，随环境走，不进 npm 包。
+六套自检脚本**不在包里**，在 `test/`（见 [testing.md](testing.md)）；`npm test` 一次跑完：
+它们是开发期资产，不进 npm 包。
 
 ## 改动怎么生效
 

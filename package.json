@@ -49,5 +49,9 @@
     "sandbox",
     "access-control",
     "plugin"
-  ]
+  ],
+  "author": "kerzeftu",
+  "scripts": {
+    "test": "node test/run-all.mjs"
+  }
 }

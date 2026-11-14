@@ -98,7 +98,7 @@ DSH（DeepSeek Harness）的一个 Cordis bundle：**新增**两个权限档（�
 | `client.js` | 浏览器半：权限控件、额外路径面板、确认弹窗 |
 | `cordis.patch.yml` | 五档预设表 + 插件级别配置 |
 | `locale/*.json` | manifest 文案（界面文案在 `client.js` 的字典里） |
-| `test/delegation.test.mjs` | 随包测试：委派继承、写切片、解析边角 |
+| `test/` | 测试：`delegation.test.mjs`（随包）+ 六套自检（开发资产，`npm test` 一次跑完） |
 | `docs/` | 上表那份文档 |
 
 ## 已知边界
