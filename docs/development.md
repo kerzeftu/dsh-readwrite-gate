@@ -15,7 +15,7 @@
 └── CHANGELOG.md
 ```
 
-六套自检脚本**不在包里**，在 `/home/kerze/.access-permission-selftest/`（见 [testing.md](testing.md)）：
+六套自检脚本**不在包里**，在 `<selftest-dir>/`（见 [testing.md](testing.md)）：
 它们是开发期资产，随环境走，不进 npm 包。
 
 ## 改动怎么生效
@@ -29,7 +29,7 @@
 重启命令（本机）：
 
 ```bash
-node /home/kerze/.dsh-versions/<version>/node_modules/.bin/dsh --profile <profile> --port 10714 --no-open
+node <dsh-dir>/<version>/node_modules/.bin/dsh --profile <profile> --port 10714 --no-open
 ```
 
 `dsh` 不在 `PATH` 里，必须用全路径。重启前先确认监听端口上的 pid 与 cmdline，避免杀掉别的会话：

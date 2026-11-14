@@ -21,6 +21,7 @@
     "locale/zh.json",
     "icon.svg",
     "README.md",
+    "LICENSE",
     "test/delegation.test.mjs",
     "CHANGELOG.md",
     "docs"
@@ -36,5 +37,17 @@
         "@deepseek-ai/dsh-api-session-controller"
       ]
     }
-  }
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "dsh",
+    "cordis",
+    "permission",
+    "sandbox",
+    "access-control",
+    "plugin"
+  ]
 }

@@ -2,14 +2,18 @@
 
 ## 安装到一个 profile
 
-插件以 `link:` 方式装进某个 Harness profile（本机是 `/home/kerze/.dsh/profiles/0.2.1-alpha.1`）：
+插件以 `link:` 方式装进某个 Harness profile（本机是 `<profile-dir>`）：
 
 1. `package.json` 的 `dependencies` 增加
-   `"@local/dsh-access-permission": "link:/home/kerze/dsh-access-permission-plugin"`；
+   `"@local/dsh-access-permission": "link:<repo-path>"`；
 2. `dsh.profile.bundles` 里加上 `@local/dsh-access-permission`；
 3. 重启 Harness。
 
 `link:` 是软链：浏览器拿到的就是仓库里的活文件，全盘只有一份副本。
+
+已在 DSH `0.2.1-alpha.1` 与 `0.2.2-rc.3` 上验证（组合配置与真机行为）。其他版本先按
+[troubleshooting.md](troubleshooting.md) 的“最小 profile 验证法”确认能加载。
+
 
 > ⚠️ **不要在这个目录里跑 `npm pack`**。`npm pack` 会把 profile 的依赖改写成 `file:…tgz`
 > 并把 bundle 从 `dsh.profile.bundles` 里踢掉，结果插件整个不加载且没有明显报错。
@@ -107,8 +111,8 @@ profile 自己的 `cordis.patch.yml` 若也写了一段 `- id: permission`，它
 ## 桌面导出（本机习惯）
 
 ```bash
-mkdir -p /home/kerze/Desktop/dsh-access-permission-plugin
-cp -a /home/kerze/dsh-access-permission-plugin/. /home/kerze/Desktop/dsh-access-permission-plugin/
+mkdir -p ~/Desktop/dsh-access-permission-plugin
+cp -a <repo-path>/. ~/Desktop/dsh-access-permission-plugin/
 ```
 
 COPY 不带 `.git`，需要历史的副本另外 `tar` 整个仓库。

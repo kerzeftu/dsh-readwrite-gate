@@ -36,7 +36,7 @@ DSH（DeepSeek Harness）的一个 Cordis bundle：**新增**两个权限档（�
 
 ```json
 {
-  "dependencies": { "@local/dsh-access-permission": "link:/home/kerze/dsh-access-permission-plugin" },
+  "dependencies": { "@local/dsh-access-permission": "link:<repo-path>" },
   "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@local/dsh-access-permission"] } }
 }
 ```
@@ -45,6 +45,18 @@ DSH（DeepSeek Harness）的一个 Cordis bundle：**新增**两个权限档（�
 
 > ⚠️ 不要在本目录里跑 `npm pack`：它会把 profile 依赖改写成 `file:…tgz` 并把 bundle 从 `dsh.profile.bundles` 里踢掉，
 > 结果是插件静默不加载。要打包就复制一份到别处再打（见 [docs/development.md](docs/development.md)）。
+
+## 兼容性
+
+已实测通过（加载、`--dump-config` 合成、真机读写与授权流程）：
+
+| DSH 版本 | 状态 |
+|---|---|
+| `0.2.1-alpha.1` | 主力开发版本，全量验证 |
+| `0.2.2-rc.3` | 已验证：组合配置正确（五档名称、`/tmp` 语义、级别键），启动无报错 |
+
+宿主 API 依赖见 [docs/architecture.md](docs/architecture.md)（服务注入、`tools/pre-execute` 瀑布、`conversation.input.permission` 单座位）。
+换新版本时按 [docs/troubleshooting.md](docs/troubleshooting.md) 的“最小 profile 验证法”先验加载，再跑六套自检。
 
 ## 命令
 

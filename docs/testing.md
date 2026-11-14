@@ -5,7 +5,7 @@
 | 位置 | 内容 | 跑法 |
 |------|------|------|
 | `test/delegation.test.mjs` | 随包测试：委派继承、写切片、解析边角（`file://`、箭头函数、`2>&1`） | `node test/delegation.test.mjs` |
-| `/home/kerze/.access-permission-selftest/` | 开发期六套自检，覆盖宿主行为、界面、座位、文档一致性 | `node check-*.mjs` |
+| `<selftest-dir>/` | 开发期六套自检，覆盖宿主行为、界面、座位、文档一致性 | `node check-*.mjs` |
 
 六套自检是开发资产，不在 npm 包里（依赖宿主 checkout 与测试桩）。
 
@@ -23,7 +23,7 @@
 跑法：
 
 ```bash
-cd /home/kerze/.access-permission-selftest
+cd <selftest-dir>
 for f in check-locale check-panel check-menu check-visual check-gate check-seat; do
   printf '%-14s ' "$f"; node "$f.mjs" 2>&1 | tail -1
 done

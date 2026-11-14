@@ -262,14 +262,14 @@ old row can always still be dropped.
 
 ## Packaging note (keep the link intact)
 
-The profile installs this bundle as `link:/home/kerze/dsh-access-permission-plugin`.
+The profile installs this bundle as `link:<repo-path>`.
 Never run `npm pack` (or any npm/pnpm install) **inside this directory**: npm
 rewrites the profile dependency to `file:…tgz` and DSH then drops the bundle from
 `dsh.profile.bundles`, so the plugin silently stops loading entirely. Pack from a
 copy instead:
 
 ```sh
-DIST=/home/kerze/dsh-access-permission-dist
+DIST=<repo-path>-dist
 rm -rf "$DIST"; mkdir -p "$DIST/pkg/locale"
 cp README.md package.json index.js functions.js client.js cordis.patch.yml icon.svg "$DIST/pkg/"
 cp locale/*.json "$DIST/pkg/locale/"
@@ -278,5 +278,5 @@ rm -rf "$DIST/pkg"
 ```
 
 If it happens anyway, reinstall the bundle directory through the plugin manager
-(`install_bundle /home/kerze/dsh-access-permission-plugin`).
+(`install_bundle <repo-path>`).
 

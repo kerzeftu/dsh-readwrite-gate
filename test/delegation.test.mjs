@@ -16,7 +16,7 @@ import assert from 'node:assert/strict'
 import { apply } from '../index.js'
 import { analyzeShell, classifyTool, isUrlLike } from '../functions.js'
 
-const root = '/home/kerze/subagent/demo'
+const root = '/home/user/subagent/demo'
 const NEXT = 'NEXT'
 
 /** A session that plays the conversation root. */
@@ -126,10 +126,13 @@ await allowed(parent, 'write', { file_path: 'README.md', content: 'x' }, 'parent
 //    URL is an address, not a filesystem path.
 await allowed(child, 'bash', { command: 'cd src && node build.mjs' }, 'opaque command running inside the slice')
 await refused(child, 'bash', { command: 'cd .. && node build.mjs' }, 'opaque command running outside the slice', '越界写入')
-// A `file:///…` argument must neither become a path nor trigger a dialog.
-assert.equal(isUrlLike('file:///etc/passwd'), true)
-assert.deepEqual(analyzeShell('cat file:///etc/passwd').paths, [])
-await allowed(child, 'bash', { command: 'cat file:///etc/passwd' }, 'a URL argument is not a path')
+// `file:///…` names a local file, so it is a path like any other; every other
+// scheme stays an address that names no filesystem path.
+assert.equal(isUrlLike('file:///etc/passwd'), false)
+assert.equal(isUrlLike('https://example.com/x'), true)
+assert.deepEqual(analyzeShell('cat file:///etc/passwd').readPaths, ['/etc/passwd'])
+assert.deepEqual(analyzeShell('curl https://example.com/x').paths, [])
+await refused(child, 'bash', { command: 'cat file:///etc/passwd' }, 'a file:// argument is a local path', '用户未授权')
 // An arrow function is not a shell redirect.
 assert.deepEqual(analyzeShell('node -e "const f = () => 1"').writePaths, [])
 // A file-descriptor duplication (`2>&1`) is a descriptor, not a path: it must

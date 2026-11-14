@@ -87,7 +87,7 @@ tools/pre-execute
 | 来源 | 示例 | 推导 |
 |---|---|---|
 | 脚本文件所在目录 | `node /tmp/x/build.mjs` | `/tmp/x` |
-| 生效工作目录 | 从同一行的 `cd` 推；没有就是工具参数 `cwd/workdir`，再没有就是工作区根 | `/home/kerze` |
+| 生效工作目录 | 从同一行的 `cd` 推；没有就是工具参数 `cwd/workdir`，再没有就是工作区根 | `~` |
 | 命令行里出现的字面路径及其父目录 | `bash /tmp/run.sh --conf /etc/app.conf` | `/tmp`、`/etc` |
 | 完全推导不出 | `node`、`sh`（读 stdin） | 只保留工作目录 |
 
@@ -185,7 +185,7 @@ tools/pre-execute
 
 ## 6. 测试矩阵（新增断言要点）
 
-1. **目录推导**：`sed -i /tmp/a/b.txt` → 记录目录 `/tmp/a`；`rm -rf /tmp/build` → `/tmp/build`；`rmdir /tmp/x` → `/tmp/x`；`mkdir -p /tmp/a/b` → `/tmp/a`；`> /tmp/a/out.log` → `/tmp/a`；`cp /tmp/a /home/kerze/b` → 读 `/tmp/a`、写 `/home/kerze`；`mv /tmp/a /home/kerze/b` → 写 `/tmp` 与 `/home/kerze`。
+1. **目录推导**：`sed -i /tmp/a/b.txt` → 记录目录 `/tmp/a`；`rm -rf /tmp/build` → `/tmp/build`；`rmdir /tmp/x` → `/tmp/x`；`mkdir -p /tmp/a/b` → `/tmp/a`；`> /tmp/a/out.log` → `/tmp/a`；`cp /tmp/a ~/b` → 读 `/tmp/a`、写 `~`；`mv /tmp/a ~/b` → 写 `/tmp` 与 `~`。
 2. **opaque（要点 1）**：工作区内查看下 `node build.mjs`（cwd=工作区）⇒ **allow**；`node /tmp/x.mjs` ⇒ **ask**（列出 `/tmp`）；`bash /tmp/run.sh --conf /etc/app.conf` ⇒ ask（列出 `/tmp`、`/etc`）；`node` 无参数 ⇒ 按 cwd；全部区外且用户选「不允许」⇒ deny。
 3. **目录授权（要点 2）**：`sed -i /tmp/a/b.txt` 选「总是」⇒ 面板出现 `/tmp/a`；随后写 `/tmp/a/c.txt`、`/tmp/a/sub/d.txt` ⇒ 不再弹窗；`remove-write /tmp/a` 后再写 ⇒ 重新弹窗；读族不受该写授权影响。
 4. **工作区可写（要点 3）**：§4.2 矩阵全部 `allow` 且弹窗 0 次。

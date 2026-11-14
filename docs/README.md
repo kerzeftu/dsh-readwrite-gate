@@ -22,6 +22,10 @@
 
 约定：
 
+占位符：`<repo-path>` 是本仓库的绝对路径，`<profile-dir>` 是 Harness profile 目录，
+`<dsh-dir>` 是某个 DSH 版本目录，`<selftest-dir>` 是开发期自检脚本目录（不在仓库内）；`~` 指当前用户主目录。
+
+
 - 文档里出现的路径都相对仓库根目录；`index.js` / `functions.js` / `client.js` / `cordis.patch.yml` 指仓库根下的同名文件。
 - 代码行号会漂移，因此正文只引用函数名和文件；需要精确位置时用 `grep`。
 - 图表一律用 ASCII，不引入图片依赖。

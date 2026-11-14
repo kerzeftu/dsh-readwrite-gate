@@ -241,7 +241,11 @@ export function isNeutralPath(path) {
  * @returns whether it starts with a URL scheme.
  */
 export function isUrlLike(word) {
-  return typeof word === 'string' && /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(word)
+  // `file:///…` opens a local file, so it is a path rather than an address; every
+  // other scheme (https, ftp, …) names no filesystem path and is ignored.
+  return typeof word === 'string'
+    && /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(word)
+    && fileUrlPath(word) === undefined
 }
 
 /**

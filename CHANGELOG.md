@@ -4,6 +4,17 @@
 
 ## Unreleased
 
+### Added
+- `LICENSE`：MIT。`package.json` 补 `license`、`engines.node >= 22`、`keywords`，`files` 收录 `LICENSE`。
+- 文档中的本机绝对路径全部替换为占位符（`<repo-path>`、`<profile-dir>`、`<dsh-dir>`、`<selftest-dir>`、`~`），
+  测试夹具路径改为与具体机器无关的形式。
+- README/配置文档标明已测试版本：DSH `0.2.1-alpha.1`（主力）与 `0.2.2-rc.3`（组合配置+启动验证）。
+
+### Fixed
+- `isUrlLike()` 把 `file://…` 也当远程地址，导致 `curl file:///etc/passwd` 这类本地读取在判定里“不涉及路径”；
+  现在 `file://` 归为本地路径，只有其他 scheme 才算地址。随包 `test/delegation.test.mjs` 的对应断言同步更新
+  （此前该断言锁的是旧行为，跑 `node test/delegation.test.mjs` 会失败）。
+
 ### Docs
 - 新增 `docs/`：总览、架构、档位与范围、路径判定、授权、界面、配置、开发、测试、排障十份职能文档，
   外加六条设计决策（ADR）与历史归档；`docs/README.md` 是文档地图。

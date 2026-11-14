@@ -193,7 +193,7 @@ export function normalizeUserPath(raw, options = {})
 真机上「选择目录…」仍然报错；根因不在渲染，也不在 pick 失败的接线，而在**远程调用的参数个数**：
 
 - `client.js` 的 `listDirectory(null)` 走了 `ctx.remote.directoryPicker.list()`（零个业务参数）。typert 生成的客户端按声明校验参数个数，直接抛 `client api: directoryPicker/list expected 1 business argument(s) plus an optional AbortSignal, got 0`；`listDirectory` 的 catch 把它转成 `{ failure }`，内置浏览器因此一打开就显示错误行。
-- 修复：`listDirectory` 始终显式传一个业务参数——`list(typeof path === 'string' && path !== '' ? path : undefined)`；后端把 `undefined` 当默认值（主目录）。实测 `list(undefined)` 返回 `{ path: '/home/kerze', home: '/home/kerze', crumbs: 3, entries: 14, truncated: false }`。
+- 修复：`listDirectory` 始终显式传一个业务参数——`list(typeof path === 'string' && path !== '' ? path : undefined)`；后端把 `undefined` 当默认值（主目录）。实测 `list(undefined)` 返回 `{ path: '~', home: '~', crumbs: 3, entries: 14, truncated: false }`。
 - 验证方式：临时 occupant（slot `conversation.input.right`，order 950）在真实页面里跑 `pick()`/`list()`，把结果编码进 `/access-allow list DIAG …` 的参数；该命令的 `command/run` 会原样写进会话日志，据此读出结果（命令本身仍 success，因为 `list` 分支忽略多余参数）。临时探针已移除。
 - 测试：`check-panel.mjs` 的假 `directoryPicker.list` 现在按参数个数抛错（复刻生成客户端的校验），并新增三条断言（默认目录、显式目录、源码不得出现空参调用）。负向对照：把修复回退成 `list()` 跑出正好 3 FAIL（含真实错误文本）。
 - 该修复只在浏览器半边，HMR 已热更新到页面，无需重启 Harness；当前 `client.js` md5 `7b21504fc33c078fc3aa2a4e50f17335`（`index.js`/`functions.js` 未变）。
@@ -219,7 +219,7 @@ export function normalizeUserPath(raw, options = {})
   - 在标题与面包屑之间加「快捷位置」一行：`主目录`（来自 listing 的 `home`）、`WSL 根目录`（`/`）、每个盘符一个 chip；点击直接 `loadListing(family, path)`，当前路径的 chip 变淡。
   - 新 locale 键 `browsePlaces`、`browseWslRoot`（zh/en 齐全）。
 - 测试：`check-panel.mjs` 的假 `list` 改为按路径返回（`/mnt` 返回 c/d/e 与 wsl/wslg），点击链路新增 4 条断言：快捷位置行存在、C:/D: 都在、`/mnt` 内部目录不当盘符、chip 的 onClick 接到 `loadListing`。负向对照：删掉整行 ⇒ 3 FAIL；去掉单字母过滤 ⇒ 1 FAIL（`/mnt` 内部目录被当盘符）。
-- 真机验证（临时 occupant 探针，事后已移除）：宿主 `list('/mnt')` 返回 `["c","d","e","wsl","wslg"]`，`list('/mnt/c')` 返回 15 个子目录；页面上的「选择目录」对话框里出现 chip：`主目录`、`WSL 根目录`、`C:`、`D:`、`E:`，title 分别是 `/home/kerze`、`/`、`/mnt/c`、`/mnt/d`、`/mnt/e`。
+- 真机验证（临时 occupant 探针，事后已移除）：宿主 `list('/mnt')` 返回 `["c","d","e","wsl","wslg"]`，`list('/mnt/c')` 返回 15 个子目录；页面上的「选择目录」对话框里出现 chip：`主目录`、`WSL 根目录`、`C:`、`D:`、`E:`，title 分别是 `~`、`/`、`/mnt/c`、`/mnt/d`、`/mnt/e`。
 - 当前指纹：`client.js` `fd2e26a9df80c4de3f4a7f8200388cd9`（`index.js`/`functions.js` 仍未变，客户端改动靠 HMR 生效，无需重启）。六套自检：locale 7 / panel 41 / menu 36 / visual 67 / gate 210 / seat 21，全绿。
 - 备注：手动输入框目前不会把 `C:\Users\…` 自动映射成 `/mnt/c/Users/…`；如果要把这种写法也识别成真实路径，需要改宿主半的 `normalizeUserPath`（要重启一次 Harness），本次未做。
 

@@ -32,7 +32,7 @@ DSH 自带的文件沙箱只围栏**写**：`mode: read-only` 拦所有写，`wo
 
 - **级别（level）**：插件内部的 `full` / `workspace` / `none`，决定某一族（读或写）是否受限。
 - **范围（scope）**：`readScope` / `writeScope`，取值 `anywhere` / `workspace` / `none`，说明这一族允许到哪里。
-- **工作区（workspace root）**：当前会话的工作目录，由平台 `sandboxPolicy.resolve()` 给出（本机是 `/home/kerze`）。
+- **工作区（workspace root）**：当前会话的工作目录，由平台 `sandboxPolicy.resolve()` 给出（本机是 `~`）。
 - **临时区（temp area）**：`/tmp` 与 `os.tmpdir()`，平台沙箱在可写模式下本来就放行，插件把它视为“内部”。
 - **额外路径（extra path）**：本对话在级别之外额外允许的路径（面板里那两框），可随时移除。
 - **opaque 命令**：路径已无法从命令文本里推断的命令（脚本、未知程序），按运行目录判定。
