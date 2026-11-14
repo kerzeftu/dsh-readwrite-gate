@@ -21,7 +21,9 @@
     "locale/zh.json",
     "icon.svg",
     "README.md",
-    "test/delegation.test.mjs"
+    "test/delegation.test.mjs",
+    "CHANGELOG.md",
+    "docs"
   ],
   "dsh": {
     "bundle": {

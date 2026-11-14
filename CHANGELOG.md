@@ -2,6 +2,15 @@
 
 内部使用（`private`），不对外分发。
 
+## Unreleased
+
+### Docs
+- 新增 `docs/`：总览、架构、档位与范围、路径判定、授权、界面、配置、开发、测试、排障十份职能文档，
+  外加六条设计决策（ADR）与历史归档；`docs/README.md` 是文档地图。
+- 根 `README.md` 改为入口：五档表、安装、`/access-allow` 速查、文档索引、已知边界。
+- 早期方案草稿移入 `docs/history/`，拆分前的 README 快照一并留档。
+- `package.json` 的 `files` 增加 `CHANGELOG.md` 与 `docs`。
+
 ## 1.2.0 — 2026-11-15
 
 ### Added
