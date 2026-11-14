@@ -1,8 +1,8 @@
 # Changelog
 
-内部使用（`private`），不对外分发。
+公开仓库：<https://github.com/kerzeftu/dsh-readwrite-gate>（MIT）。
 
-## Unreleased
+## 1.3.0 — 2026-11-15
 
 ### Added
 - `LICENSE`：MIT。`package.json` 补 `license`、`engines.node >= 22`、`keywords`，`files` 收录 `LICENSE`。

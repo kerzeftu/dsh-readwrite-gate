@@ -1,9 +1,17 @@
 {
   "name": "dsh-readwrite-gate",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "private": true,
   "type": "module",
   "description": "Adds no-access and read-and-write-inside-workspace permission levels with a separate read/write authorization dialog.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kerzeftu/dsh-readwrite-gate.git"
+  },
+  "homepage": "https://github.com/kerzeftu/dsh-readwrite-gate#readme",
+  "bugs": {
+    "url": "https://github.com/kerzeftu/dsh-readwrite-gate/issues"
+  },
   "exports": {
     ".": "./index.js",
     "./functions": "./functions.js",
