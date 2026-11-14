@@ -11,7 +11,7 @@
 - README/配置文档标明已测试版本：DSH `0.2.1-alpha.1`（主力）与 `0.2.2-rc.3`（组合配置+启动验证）。
 
 ### Changed
-- 插件改用正式名 `dsh-readwrite-gate`（显示名「读写闸门」）：`package.json` 的 `name`、
+- 插件改用正式名 `dsh-readwrite-gate`（显示名「司门」）：`package.json` 的 `name`、
   `cordis.patch.yml` 的 `- id: readwrite-gate`、客户端模块 id、日志前缀、授权页问题 id、
   座位注册名与 `conversation.input.right` 控件 id 一并更新。**改客户端模块 id 必须重启
   Harness**——只刷新页面会让宿主注册表仍按旧 id 查找，客户端半静默不注册、界面回退到

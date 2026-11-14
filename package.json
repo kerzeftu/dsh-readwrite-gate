@@ -30,9 +30,9 @@
     "icon.svg",
     "README.md",
     "LICENSE",
-    "test/delegation.test.mjs",
     "CHANGELOG.md",
-    "docs"
+    "docs",
+    "test"
   ],
   "dsh": {
     "bundle": {

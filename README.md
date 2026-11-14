@@ -1,6 +1,6 @@
-# 读写闸门 · `dsh-readwrite-gate`
+# 司门 · `dsh-readwrite-gate`
 
-DSH（DeepSeek Harness）的一个 Cordis bundle（显示名「读写闸门」，包名 `dsh-readwrite-gate`；
+DSH（DeepSeek Harness）的一个 Cordis bundle（显示名「司门」，包名 `dsh-readwrite-gate`；
 仓库 <https://github.com/kerzeftu/dsh-readwrite-gate>）：**新增**两个权限档（无权限、工作区内读写），
 并让每一次文件操作都先经过“级别 → 范围 → 授权”的判定；工作区之外的操作会停下来问用户，**读和写分开授权**。
 
