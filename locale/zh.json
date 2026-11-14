@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "访问权限分级 / Access Permission Levels",
+    "description": "新增“无权限”和“工作区内读写”两种权限类型，并提供读取与修改分开授权的请求授权页。"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Access Permission Levels",
+    "description": "Adds the no-access and read-and-write-inside-workspace levels, with a separate read and write authorization dialog."
+  }
+}
