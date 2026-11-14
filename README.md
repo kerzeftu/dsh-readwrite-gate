@@ -1,39 +1,41 @@
 # 司门 · `dsh-readwrite-gate`
 
-DSH（DeepSeek Harness）的一个 Cordis bundle（显示名「司门」，包名 `dsh-readwrite-gate`；
-仓库 <https://github.com/kerzeftu/dsh-readwrite-gate>）：**新增**两个权限档（无权限、工作区内读写），
-并让每一次文件操作都先经过“级别 → 范围 → 授权”的判定；工作区之外的操作会停下来问用户，**读和写分开授权**。
+**简体中文** | [English](README.en.md)
 
-```text
-模型要用文件
-   │
-   ├── 在范围内 ────────────────► 放行（写入仍受平台沙箱约束）
-   ├── 在范围外，本对话已授权 ──► 放行
-   └── 在范围外，未授权 ────────► 授权页：不允许 / 仅一次 / 该对话中总是允许
-                                      └── 「总是」把这条路径记进「额外可读写文件」，可随时撤销
-```
+司门是 DeepSeek Harness（DSH）的文件访问权限插件。它在原有权限预设的基础上，增加“无权限”和“工作区内读写”，并为受限范围之外的文件操作提供授权提示。
 
-## 五个权限档
+使用时，在输入框的权限菜单中选择档位。需要额外访问文件时，可通过授权提示或“额外可读写文件”面板设置权限。
 
-| 菜单里的档位 | 预设 id | 读 | 写 | 平台沙箱 |
-|---|---|---|---|---|
-| 无权限 | `no-access` | 全拒（除非本对话单独授权过该路径） | 全拒 | `read-only` |
-| 工作区内读写 | `workspace-access` | 工作区 + 临时目录；以外逐次授权 | 工作区 + 临时目录；以外弹页后仍被沙箱拒绝 | `workspace-write` |
-| 只读 | `read-only` | 任意路径 | 全拒 | `read-only` |
-| 工作区内编辑 | `workspace-write` | 任意路径 | 工作区 + 临时目录；以外逐次授权 | `workspace-write` |
-| 完全访问 | `danger-full-access` | 任意路径 | 任意路径 | `danger-full-access` |
+## 选择权限档位
 
-五档按“给多少”排序，但**不是嵌套集合**：只读能读全盘却写不了任何东西，工作区内读写能改工作区却读不到别处。
-原有三档的语义、id 与沙箱保持不变，只在其间插入两档。
+| 档位 | 可读取的范围 | 可修改的范围 |
+|---|---|---|
+| 无权限 | 默认禁止读取；手动添加的读白名单除外 | 禁止修改 |
+| 工作区内读写 | 工作区和临时目录；其他路径需要授权 | 工作区和临时目录 |
+| 只读 | 任意路径 | 禁止修改 |
+| 工作区内编辑 | 任意路径 | 工作区和临时目录 |
+| 完全访问 | 任意路径 | 任意路径 |
 
-两条不变量：
+“工作区内读写”与“工作区内编辑”的区别在于读取范围，二者允许修改的范围相同。临时目录包括 `/tmp` 和系统提供的临时目录。
 
-- **读写分开**：允许读不等于允许写，反之亦然。面板里可写行也会出现在读框（写蕴含读），撤销时按行/按族区分。
-- **失败即拒**：没有可用的提问通道、配置无法识别、路径解析不出来，一律拒绝而不是放行。
+在两种工作区档位下，修改范围之外的路径也会触发授权提示，但允许后仍受 DSH 沙箱限制，不能据此获得区外写入权限。
+
+## 授权与撤销
+
+授权提示提供“不允许”“仅一次”和“该对话中总是可以访问／修改”三个选项。
+
+- 读取授权不会自动授予修改权限。
+- “总是允许”通常记录文件所在的目录，而非单个文件；授权覆盖该目录下的内容。确认前请核对提示中的路径。
+- “额外可读写文件”面板分为读、写两栏。可写路径也显示在读栏中；删除读栏中的路径会同时撤销其写权限，删除写栏中的路径仅撤销写权限。
+- 授权仅在当前 Harness 进程内保留，重启后需要重新授权。
+
+具体规则见[授权说明](docs/authorization.md)。
 
 ## 安装
 
-在目标 profile 的 `package.json` 里挂软链，并把 bundle 加进 `dsh.profile.bundles`：
+下载 [Release 附件](https://github.com/kerzeftu/dsh-readwrite-gate/releases)或克隆仓库，保留一份本地插件目录，再将其安装到需要使用的 DSH profile 中。安装步骤见[安装与配置](docs/configuration.md)。
+
+手动配置时，在 profile 的 `package.json` 中添加依赖和 bundle 条目。以下仅展示相关字段，请合并到现有配置，不要覆盖整个文件；`<repo-path>` 应替换为本地插件目录的绝对路径：
 
 ```json
 {
@@ -42,68 +44,44 @@ DSH（DeepSeek Harness）的一个 Cordis bundle（显示名「司门」，包�
 }
 ```
 
-重启 Harness 生效。宿主半（`index.js`/`functions.js`/`cordis.patch.yml`）改动必须重启；`client.js` 改动刷新页面即可。
-
-> ⚠️ 不要在本目录里跑 `npm pack`：它会把 profile 依赖改写成 `file:…tgz` 并把 bundle 从 `dsh.profile.bundles` 里踢掉，
-> 结果是插件静默不加载。要打包就复制一份到别处再打（见 [docs/development.md](docs/development.md)）。
+安装或升级后重启 Harness。打包与开发注意事项见[开发指南](docs/development.md)。
 
 ## 兼容性
 
-已实测通过（加载、`--dump-config` 合成、真机读写与授权流程）：
+各版本的验证范围如下，不能视为对所有 DSH 版本的兼容承诺：
 
 | DSH 版本 | 状态 |
 |---|---|
-| `0.2.1-alpha.1` | 主力开发版本，全量验证 |
-| `0.2.2-rc.3` | 已验证：组合配置正确（五档名称、`/tmp` 语义、级别键），启动无报错 |
+| `0.2.1-alpha.1` | 主要开发版本，已验证加载、文件访问及授权流程 |
+| `0.2.2-rc.3` | 已验证配置组合与启动，未进行同等范围的行为验证 |
 
-宿主 API 依赖见 [docs/architecture.md](docs/architecture.md)（服务注入、`tools/pre-execute` 瀑布、`conversation.input.permission` 单座位）。
-换新版本时按 [docs/troubleshooting.md](docs/troubleshooting.md) 的“最小 profile 验证法”先验加载，再跑六套自检。
+其他版本请先在独立 profile 中验证加载和授权行为，排查方法见[故障排查](docs/troubleshooting.md)。
 
 ## 命令
 
 | 用法 | 作用 |
 |------|------|
-| `/access-allow`、`/access-allow list` | 当前级别、预设、scope、额外路径 |
-| `/access-allow add <path>` | 加一条读白名单（越级别生效，只读） |
-| `/access-allow add-write <path>` | 加一条写授权 |
-| `/access-allow remove <path>` / `remove-read` / `remove-write` | 撤销（按族可选） |
+| `/access-allow` 或 `/access-allow list` | 查看当前权限与额外路径 |
+| `/access-allow add <path>` | 添加读白名单，在“无权限”下仍可读取 |
+| `/access-allow add-write <path>` | 添加修改授权，仍受当前档位与沙箱限制 |
+| `/access-allow remove <path>` | 撤销该路径的读取和修改授权 |
 | `/access-allow clear` | 清空本对话的额外路径 |
 
-级别本身没有命令：在输入框的权限菜单里切换，控件由本插件接管（座位 `conversation.input.permission`，`priority: -1`）。
-完整参数与路径识别规则见 [docs/configuration.md](docs/configuration.md)。
+权限档位通过输入框的菜单切换，不使用上述命令。路径可在面板中管理，也可使用命令；完整用法见[安装与配置](docs/configuration.md)。
 
-## 文档
+## 使用限制
 
-| 想了解 | 看这里 |
-|--------|--------|
-| 项目是什么、术语 | [docs/overview.md](docs/overview.md) |
-| 一次调用经过哪些组件、状态存在哪 | [docs/architecture.md](docs/architecture.md) |
-| 五档与 `readScope`/`writeScope` 的对应关系 | [docs/levels-and-scopes.md](docs/levels-and-scopes.md) |
-| 怎么判定读了什么、写了什么 | [docs/path-analysis.md](docs/path-analysis.md) |
-| 授权页怎么弹、授权存哪、怎么失效 | [docs/authorization.md](docs/authorization.md) |
-| 控件、面板、弹窗、主题约束 | [docs/ui.md](docs/ui.md) |
-| 安装与全部配置项 | [docs/configuration.md](docs/configuration.md) |
-| 改代码、调试、发布 | [docs/development.md](docs/development.md) |
-| 六套自检测什么 | [docs/testing.md](docs/testing.md) |
-| 出问题按症状查 | [docs/troubleshooting.md](docs/troubleshooting.md) |
-| 关键设计为什么这样定 | [docs/decisions/](docs/decisions/) |
+司门通过分析工具参数和命令中的路径判断访问范围，不是操作系统级的安全沙箱。对于无法完整分析的命令，按运行目录或配置的拒绝策略处理，不能据此保证任意脚本都不会越界。写入操作还须通过 DSH 自身的沙箱检查。
 
-完整文档地图见 [docs/README.md](docs/README.md)，变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+## 更多说明
 
-## 文件
+- [项目概览](docs/overview.md)：功能、适用范围与常用术语。
+- [安装与配置](docs/configuration.md)：安装步骤、配置字段和命令用法。
+- [授权说明](docs/authorization.md)：授权范围、有效期和撤销方式。
+- [故障排查](docs/troubleshooting.md)：安装后未生效或行为异常时的检查方法。
 
-| 文件 | 作用 |
-|------|------|
-| `index.js` | 宿主半：闸门、级别解析、授权页、命令、系统提示 |
-| `functions.js` | 纯函数：shell 分析、读写判定、路径归一化与包含判断（可单测） |
-| `client.js` | 浏览器半：权限控件、额外路径面板、确认弹窗 |
-| `cordis.patch.yml` | 五档预设表 + 插件级别配置 |
-| `locale/*.json` | manifest 文案（界面文案在 `client.js` 的字典里） |
-| `test/` | 测试：`delegation.test.mjs`（随包）+ 六套自检（开发资产，`npm test` 一次跑完） |
-| `docs/` | 上表那份文档 |
+维护者可从[文档目录](docs/README.md)查阅架构、开发与测试说明。版本变化见[更新记录](CHANGELOG.md)。
 
-## 已知边界
+## 许可证
 
-- 包含判断是词法折叠 + `realpath`，不是内核级围栏；插件只决定“该不该做”，写入能否落盘由平台沙箱决定。
-- 授权是**对话内内存态**：重启 Harness 后重新询问（取舍见 [ADR 0003](docs/decisions/0003-conversation-scoped-grants.md)）。
-- “总是允许”记的是**目录**（本次请求所在目录，覆盖其下全部），不是单个文件。
+本项目采用 [MIT 许可证](LICENSE)，作者为 kerzeftu。

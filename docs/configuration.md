@@ -1,23 +1,22 @@
 # 安装、配置与命令
 
-## 安装到一个 profile
+## 安装
 
-插件以 `link:` 方式装进某个 Harness profile（本机是 `<profile-dir>`）：
+从 [GitHub Releases](https://github.com/kerzeftu/dsh-readwrite-gate/releases) 下载 `.tgz` 附件并解压，或克隆仓库。解压后的 `package` 目录或仓库根目录均可作为本地插件目录；请将其放在固定位置，不要在安装后移动。
 
-1. `package.json` 的 `dependencies` 增加
-   `"dsh-readwrite-gate": "link:<repo-path>"`；
-2. `dsh.profile.bundles` 里加上 `dsh-readwrite-gate`；
-3. 重启 Harness。
+建议通过 DSH 的插件管理功能安装本地目录。若手动维护 profile，需同时添加依赖和 bundle 条目：
 
-`link:` 是软链：浏览器拿到的就是仓库里的活文件，全盘只有一份副本。
+1. 在目标 profile 的 `package.json` 中，将 `"dsh-readwrite-gate": "link:<repo-path>"` 加入 `dependencies`。
+2. 将 `dsh-readwrite-gate` 加入 `dsh.profile.bundles`，保留原有条目，并使用该 profile 的包管理方式安装依赖。
+3. 重启 Harness，确认权限菜单中出现“无权限”和“工作区内读写”。
 
-已在 DSH `0.2.1-alpha.1` 与 `0.2.2-rc.3` 上验证（组合配置与真机行为）。其他版本先按
-[troubleshooting.md](troubleshooting.md) 的“最小 profile 验证法”确认能加载。
+`<repo-path>` 是本地插件目录的绝对路径，不能原样保留。`link:` 安装直接引用该目录，修改目录中的文件也会影响已安装的插件；安装或升级后应重启 Harness。
 
+版本验证范围：DSH `0.2.1-alpha.1` 已进行全量验证；`0.2.2-rc.3` 已验证配置组合与启动。其他版本应先在独立 profile 中测试，方法见[故障排查](troubleshooting.md)。
 
-> ⚠️ **不要在这个目录里跑 `npm pack`**。`npm pack` 会把 profile 的依赖改写成 `file:…tgz`
-> 并把 bundle 从 `dsh.profile.bundles` 里踢掉，结果插件整个不加载且没有明显报错。
-> 需要打包就复制一份到别处再打。
+开发时不要直接在已通过 `link:` 安装的目录中打包。本项目曾遇到打包操作改变 profile 依赖的情况；发布包应从独立副本生成，步骤见[开发指南](development.md)。
+
+日常使用通常不需要修改下列级别配置，可以直接阅读本文后面的命令用法。
 
 ## 两层配置：预设表 + 级别表
 
@@ -75,13 +74,17 @@ levels:
 | `opaquePolicy` | `directory` | opaque 命令按运行目录判；`deny` 则读侧一律拒 |
 | `allow` | `[]` | 读白名单种子（`/access-allow add` 的初始值） |
 
-## profile 里可能存在的“影子预设表”
+## profile 中的重复预设配置
 
-profile 自己的 `cordis.patch.yml` 若也写了一段 `- id: permission`，它会在合成时**遮蔽**插件 bundle 里的预设表：
-菜单里显示旧名字，但插件级别表已经改成新名字，两边对不上。
+如果安装或升级后，菜单仍显示旧名称，请检查 profile 的 `cordis.patch.yml` 是否另有 `- id: permission` 配置。这段配置可能覆盖插件提供的预设表。
 
-排查方法：`dsh --profile <name> --dump-config | grep -n "工作区内"`。
-两处都要同步，或者干脆删掉 profile 里那段。
+可用以下命令查看最终合成的配置，`<name>` 应替换为 profile 名称：
+
+```bash
+dsh --profile <name> --dump-config
+```
+
+检查其中的权限名称与沙箱设置。若 profile 确有重复配置，应同步更新；如不再需要该覆盖项，备份后再移除，不要直接删除其他插件使用的配置。
 
 ## 命令：`/access-allow`
 
@@ -95,8 +98,9 @@ profile 自己的 `cordis.patch.yml` 若也写了一段 `- id: permission`，它
 | `/access-allow remove-write <path>` | 只撤写 |
 | `/access-allow clear` | 清空本对话的额外路径 |
 
-路径参数会被识别而不是当字面量：引号、`~`、`$HOME`、`file://`、相对路径（按工作区根）、`..`、Windows 盘符映射都会归一化；
-不存在但合法的路径也接受（写新文件需要）；无法识别的写法会被拒绝并给出原因。
+路径参数支持引号、`~`、`$HOME`、`file://` 和 `..`，相对路径以工作区根目录为基准。在有相应挂载的环境中，也支持 Windows 盘符映射。
+
+合法但尚不存在的路径可以添加，以便为新文件或目录预先设置权限。无法识别的路径会返回错误说明。
 
 命令输出末尾带两个机器可读标记：
 
@@ -105,14 +109,6 @@ profile 自己的 `cordis.patch.yml` 若也写了一段 `- id: permission`，它
 
 ## 卸载
 
-从 profile 的 `dependencies` 与 `dsh.profile.bundles` 里删掉，重启 Harness。
-会话里残留的级别名会失配到 `defaultLevel`（全拒），不会放宽权限。
+通过 DSH 的插件管理功能移除本插件。若使用手动配置，则从目标 profile 的 `dependencies` 和 `dsh.profile.bundles` 中移除 `dsh-readwrite-gate`，并检查是否还有为本插件单独添加的预设覆盖项。
 
-## 桌面导出（本机习惯）
-
-```bash
-mkdir -p ~/Desktop/dsh-readwrite-gate-plugin
-cp -a <repo-path>/. ~/Desktop/dsh-readwrite-gate-plugin/
-```
-
-COPY 不带 `.git`，需要历史的副本另外 `tar` 整个仓库。
+卸载后重启 Harness，并重新选择宿主提供的权限档位。卸载会移除插件的读取限制和额外授权功能，不能将其视为“无权限”模式。

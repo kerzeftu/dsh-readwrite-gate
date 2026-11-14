@@ -1,31 +1,32 @@
-# 文档地图
+# 文档目录
 
-这份目录按“你想回答什么问题”拆分，不按文件类型拆分。第一次接触请按 1 → 2 → 3 读。
+初次使用可先阅读[项目首页](../README.md)，再根据需要查看安装和授权说明，无需按顺序阅读全部文档。
 
-| # | 文档 | 回答什么问题 | 主要读者 |
-|---|------|--------------|----------|
-| 1 | [overview.md](overview.md) | 这是什么插件、解决什么问题、五个权限档各是什么、术语怎么理解 | 所有人 |
-| 2 | [architecture.md](architecture.md) | 一次文件操作从工具调用到被放行/拒绝，中间经过哪些组件、哪些状态 | 要改代码的人 |
-| 3 | [configuration.md](configuration.md) | 怎么安装、预设表和插件配置每个字段是什么、`/access-allow` 怎么用 | 部署/使用的人 |
-| 4 | [levels-and-scopes.md](levels-and-scopes.md) | 五档与 `readScope`/`writeScope` 的对应关系，平台沙箱和插件各管哪一半 | 调权限语义的人 |
-| 5 | [path-analysis.md](path-analysis.md) | 怎么从一个工具调用或一条 shell 命令里判断“读了什么、写了什么、在不在工作区” | 改判定规则的人 |
-| 6 | [authorization.md](authorization.md) | 授权页什么时候弹、三个选项各记什么、授权存哪里、什么时候失效 | 改授权逻辑的人 |
-| 7 | [ui.md](ui.md) | 输入框里的权限控件、额外路径面板、确认弹窗、座位与主题约束 | 改界面的人 |
-| 8 | [development.md](development.md) | 本地怎么改、怎么让改动生效（热更新/重启）、怎么调试 | 维护者 |
-| 9 | [testing.md](testing.md) | 六套自检各测什么、怎么加断言、负向对照的纪律 | 维护者 |
-| 10 | [troubleshooting.md](troubleshooting.md) | 改完之后没生效/样式不对/菜单打不开，按症状查 | 维护者 |
-| 11 | [decisions/](decisions/) | 关键设计决策的记录（ADR）：为什么这样选 | 想知道“为什么”的人 |
-| 12 | [history/](history/) | 早期方案草稿与拆分文档前的 README 快照，仅供追溯 | — |
+## 使用与配置
 
-根目录的 [README.md](../README.md) 只做入口：一段介绍、五档表、安装、命令速查。
-变更记录在 [CHANGELOG.md](../CHANGELOG.md)。
+| 文档 | 内容 |
+|---|---|
+| [项目概览](overview.md) | 适用场景、五个权限档位和常用术语 |
+| [安装与配置](configuration.md) | 安装、配置字段和命令用法 |
+| [授权说明](authorization.md) | 授权范围、有效期和撤销方式 |
+| [故障排查](troubleshooting.md) | 加载失败、界面异常和权限行为的检查方法 |
 
-约定：
+## 开发与维护
 
-占位符：`<repo-path>` 是本仓库的绝对路径，`<profile-dir>` 是 Harness profile 目录，
-`<dsh-dir>` 是某个 DSH 版本目录；`~` 指当前用户主目录。（六套自检已迁入仓库的 `test/`，不再需要单独的自检目录占位符。）
+| 文档 | 内容 |
+|---|---|
+| [架构说明](architecture.md) | 工具调用的处理流程、组件职责与状态存储 |
+| [权限与范围](levels-and-scopes.md) | 预设、级别和读写范围的对应关系 |
+| [路径分析](path-analysis.md) | 工具参数及命令路径的识别规则与限制 |
+| [界面实现](ui.md) | 权限控件、额外路径面板、主题与本地化 |
+| [开发指南](development.md) | 本地开发、调试、重启与发布 |
+| [测试说明](testing.md) | 测试运行方法、覆盖范围与回归验证 |
+| [设计决策](decisions/) | 主要设计选择及其原因 |
 
+版本变化见[更新记录](../CHANGELOG.md)。[历史文档](history/)保留了早期方案和旧版说明，仅用于追溯，不代表当前行为。
 
-- 文档里出现的路径都相对仓库根目录；`index.js` / `functions.js` / `client.js` / `cordis.patch.yml` 指仓库根下的同名文件。
-- 代码行号会漂移，因此正文只引用函数名和文件；需要精确位置时用 `grep`。
-- 图表一律用 ASCII，不引入图片依赖。
+## 路径约定
+
+示例中的 `<repo-path>` 指本地插件目录的绝对路径，`<profile-dir>` 指 Harness profile 目录，`<dsh-dir>` 指 DSH 版本目录，`~` 指用户主目录。使用命令前，请替换相应占位符。
+
+未特别说明的仓库文件路径均相对于仓库根目录。技术文档通常引用文件名和函数名，不依赖固定代码行号。
