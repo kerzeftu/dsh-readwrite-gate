@@ -112,7 +112,11 @@ window.__ModuleLoader__.load({
       '.ap-level-row:hover:not(:disabled),.ap-level-row:focus-visible:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);outline:none}' +
       '.ap-level-row:disabled{opacity:.4;cursor:not-allowed}' +
       '.ap-dialog-close:hover:not(:disabled),.ap-dialog-cancel:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}' +
-      '.ap-dialog-go:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}'
+      '.ap-dialog-go:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}' +
+      // The shipped Modal fades itself and its mask in; same duration token.
+      '.ap-dialog-card,.ap-dialog-mask{animation:ap-modal-enter var(--ds-transition-duration,150ms) var(--ds-ease-in-out,ease-in-out)}' +
+      '@keyframes ap-modal-enter{from{opacity:0}to{opacity:1}}' +
+      '@media (prefers-reduced-motion: reduce){.ap-dialog-card,.ap-dialog-mask{animation:none}}'
     const PALETTE_CSS =
       `body{--ap-level-read:${LEVEL_PALETTE.light.read};--ap-level-write:${LEVEL_PALETTE.light.write}}` +
       `body[data-ds-dark-theme]{--ap-level-read:${LEVEL_PALETTE.dark.read};--ap-level-write:${LEVEL_PALETTE.dark.write}}` +
@@ -207,15 +211,16 @@ window.__ModuleLoader__.load({
         ['path', { d: 'M4.2 6.4 8 10.2l3.8-3.8', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }],
       ],
       close: [
-        ['path', { d: 'M4.6 4.6 11.4 11.4', strokeWidth: 1.5, strokeLinecap: 'round' }],
-        ['path', { d: 'M11.4 4.6 4.6 11.4', strokeWidth: 1.5, strokeLinecap: 'round' }],
+        ['path', { d: 'M3.5 3.5L12.5 12.5', strokeWidth: 1 }],
+        ['path', { d: 'M12.5 3.5L3.5 12.5', strokeWidth: 1 }],
       ],
-      // The dialog's risk mark, drawn in the error colour like the shipped
-      // RiskConfirmation's warning icon.
+      // The dialog's risk mark: the shipped RiskConfirmation's
+      // `IconWarningOutlineRegular` (circle + exclamation, drawn in the error
+      // colour), so the glyph matches the host's own gate.
       warning: [
-        ['path', { d: 'M8 2.6 14.2 13.4H1.8L8 2.6Z', strokeWidth: 1.4, strokeLinejoin: 'round' }],
-        ['path', { d: 'M8 6.6v3.2', strokeWidth: 1.4, strokeLinecap: 'round' }],
-        ['circle', { cx: 8, cy: 11.6, r: 0.75, fill: 'currentColor', stroke: 'none' }],
+        ['path', { d: 'M8 14.5C11.5899 14.5 14.5 11.5899 14.5 8C14.5 4.41015 11.5899 1.5 8 1.5C4.41015 1.5 1.5 4.41015 1.5 8C1.5 11.5899 4.41015 14.5 8 14.5Z', strokeWidth: 1 }],
+        ['path', { d: 'M8 4.29199V9.79199', strokeWidth: 1 }],
+        ['path', { d: 'M8 10.708V11.708', strokeWidth: 1 }],
       ],
     }
 
@@ -232,10 +237,10 @@ window.__ModuleLoader__.load({
       current: '当前',
       switchFailed: '切换失败：',
       restartHint: '若提示未知预设，说明运行中的进程还没载入新增的权限类型，重启 Harness 后即可切换。',
-      confirmTitle: '切换到完全访问？',
-      confirmDescription: '完全访问下模型可以读取和修改任意路径的文件，不再逐一询问。',
-      confirmAcknowledge: '我了解风险，并自行承担后果',
-      confirmEnable: '切换',
+      confirmTitle: '确认启用完全访问？',
+      confirmDescription: '启用完全访问后，智能体将减少确认步骤，并且可以直接执行更多操作，包括敏感操作、文件修改或外部命令。仅建议在你信任当前任务时使用。',
+      confirmAcknowledge: '我已了解风险，并愿意继续',
+      confirmEnable: '启用完全访问',
       close: '关闭',
       cancel: '取消',
       // The extra-readable-files feature. Every key below is read by a component
@@ -284,10 +289,10 @@ window.__ModuleLoader__.load({
       current: 'current',
       switchFailed: 'Switch failed: ',
       restartHint: 'An unknown-preset error means the running process has not loaded the added access levels yet; restart the Harness and the switch works.',
-      confirmTitle: 'Switch to full access?',
-      confirmDescription: 'Under full access the model reads and modifies files anywhere without asking each time.',
-      confirmAcknowledge: 'I understand the risk and accept it',
-      confirmEnable: 'Switch',
+      confirmTitle: 'Enable Full access?',
+      confirmDescription: 'Full access reduces confirmation steps and lets the agent perform more actions directly, including sensitive operations, file changes, or external commands. Only use it when you trust the current task.',
+      confirmAcknowledge: 'I understand the risks and want to continue',
+      confirmEnable: 'Enable Full access',
       close: 'Close',
       cancel: 'Cancel',
       // Mirrors the Chinese dictionary key for key; see the note there.
@@ -1115,6 +1120,7 @@ window.__ModuleLoader__.load({
       const rootRef = React.useRef(null)
       const triggerRef = React.useRef(null)
       const menuRef = React.useRef(null)
+      const dialogRef = React.useRef(null)
       const locked = props.locked === true
       const currentValue = typeof selection?.currentValue === 'string' ? selection.currentValue : undefined
 
@@ -1319,6 +1325,49 @@ window.__ModuleLoader__.load({
           ])]))
         : null
 
+      // Modal-layer behaviour the shipped dialog gets from `useModalLayer`: the
+      // acknowledgement takes focus, Escape closes, Tab cycles inside the card,
+      // and focus returns to wherever it was when the dialog unmounts.
+      React.useEffect(() => {
+        if (confirming === null) return undefined
+        const element = dialogRef.current
+        if (element === null || element === undefined || typeof element.querySelector !== 'function') return undefined
+        const owner = element.ownerDocument ?? (typeof document === 'undefined' ? null : document)
+        if (owner === null) return undefined
+        const previous = owner.activeElement ?? null
+        const selector = 'button:not([disabled]), input:not([disabled]), [href], select, textarea, [tabindex]:not([tabindex="-1"])'
+        const initial = element.querySelector('[data-modal-autofocus]') ?? element.querySelector(selector) ?? element
+        try { initial.focus() } catch {}
+        const onKeyDown = (event) => {
+          if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey) return
+          if (event.key === 'Escape' && !event.shiftKey) {
+            event.preventDefault()
+            if (!event.repeat) {
+              setAcknowledged(false)
+              setConfirming(null)
+            }
+            return
+          }
+          if (event.key !== 'Tab' || typeof element.querySelectorAll !== 'function') return
+          const items = [...element.querySelectorAll(selector)]
+          if (items.length === 0) return
+          const first = items[0]
+          const last = items[items.length - 1]
+          const active = owner.activeElement
+          const atEdge = event.shiftKey ? active === first : active === last
+          if (active === element || element.contains(active) === false || atEdge) {
+            event.preventDefault()
+            const target = event.shiftKey ? last : first
+            try { target.focus() } catch {}
+          }
+        }
+        if (typeof owner.addEventListener === 'function') owner.addEventListener('keydown', onKeyDown)
+        return () => {
+          if (typeof owner.removeEventListener === 'function') owner.removeEventListener('keydown', onKeyDown)
+          try { if (previous !== null && previous.isConnected !== false) previous.focus() } catch {}
+        }
+      }, [confirming])
+
       const closeConfirmation = () => {
         setAcknowledged(false)
         setConfirming(null)
@@ -1348,9 +1397,10 @@ window.__ModuleLoader__.load({
           h('div', {
             key: 'mask',
             'aria-hidden': true,
-            // The mask dismisses on a press; the card sits above it, so a press
+            className: 'ap-dialog-mask',
+            // The mask dismisses on a click; the card sits above it, so a press
             // inside the dialog never reaches this handler.
-            onPointerDown: closeConfirmation,
+            onClick: closeConfirmation,
             style: {
               position: 'absolute',
               inset: 'var(--dsh-frame-chrome-top, 0px) 0 0',
@@ -1360,6 +1410,9 @@ window.__ModuleLoader__.load({
           }),
           h('div', {
             key: 'card',
+            ref: dialogRef,
+            tabIndex: -1,
+            className: 'ap-dialog-card',
             role: 'dialog',
             'aria-modal': true,
             'aria-label': props.t('confirmTitle'),
@@ -1429,6 +1482,7 @@ window.__ModuleLoader__.load({
                   h('input', {
                     key: 'box',
                     type: 'checkbox',
+                    'data-modal-autofocus': true,
                     checked: acknowledged,
                     onChange: (event) => setAcknowledged(event.target.checked),
                     style: {
