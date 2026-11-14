@@ -1,5 +1,5 @@
 /**
- * Browser half of the access-permission bundle.
+ * Browser half of the readwrite-gate bundle.
  *
  * It takes over the shipped composer permission control (`conversation.input.permission`)
  * so the composer keeps exactly one permission seat — now covering the two added
@@ -10,7 +10,7 @@
  * deployment's question panel, so this half owns the level control, not the dialog.
  */
 window.__ModuleLoader__.load({
-  id: '@local/dsh-access-permission',
+  id: 'dsh-readwrite-gate',
   factory(require) {
     const React = require('react')
     // Optional: without the DOM renderer the floating surfaces stay in tree.
@@ -104,7 +104,7 @@ window.__ModuleLoader__.load({
       light: { read: '#7a8a00', write: '#c9a227' },
       dark: { read: '#eeff00', write: '#f5e3a3' },
     }
-    const PALETTE_STYLE_ID = 'dsh-access-permission-level-palette'
+    const PALETTE_STYLE_ID = 'dsh-readwrite-gate-level-palette'
     // Hover and focus fills cannot be expressed with inline styles, and the
     // shipped surfaces get theirs from the primitive stylesheets, so the few
     // rules this plugin's own rows and buttons need ride in the same element.
@@ -448,14 +448,14 @@ window.__ModuleLoader__.load({
      */
     function requestBrowser(sessionId, family) {
       if (browserWatchers.size === 0) {
-        console.error('[access-permission] no mounted control to open the folder browser')
+        console.error('[readwrite-gate] no mounted control to open the folder browser')
         return
       }
       for (const watcher of [...browserWatchers]) {
         try {
           watcher(sessionId, family)
         } catch (cause) {
-          console.error('[access-permission] folder browser request failed:', cause)
+          console.error('[readwrite-gate] folder browser request failed:', cause)
         }
       }
     }
@@ -1096,7 +1096,7 @@ window.__ModuleLoader__.load({
       const reportFailure = (error) => {
         if (!failureReported) {
           failureReported = true
-          console.error('[access-permission] permission catalog read failed:', error)
+          console.error('[readwrite-gate] permission catalog read failed:', error)
         }
         ensurePolling()
       }
@@ -1104,7 +1104,7 @@ window.__ModuleLoader__.load({
       try {
         stop = ctx.remote.$on('permission-presets/catalog-changed', load) ?? (() => {})
       } catch (error) {
-        console.error('[access-permission] catalog-changed subscription failed:', error)
+        console.error('[readwrite-gate] catalog-changed subscription failed:', error)
       }
       try {
         ctx.on('connection/reset', load)
@@ -1237,14 +1237,14 @@ window.__ModuleLoader__.load({
         Promise.resolve(props.selectLevel(value))
           .then((failure) => {
             if (typeof failure === 'string' && failure !== '') {
-              console.error('[access-permission] permission switch failed:', failure)
+              console.error('[readwrite-gate] permission switch failed:', failure)
               setSwitchError(failure)
               return
             }
             setOpen(false)
           })
           .catch((error) => {
-            console.error('[access-permission] permission switch failed:', error)
+            console.error('[readwrite-gate] permission switch failed:', error)
             setSwitchError(error instanceof Error ? error.message : String(error))
           })
           .then(() => setPick(null))
@@ -1648,16 +1648,16 @@ window.__ModuleLoader__.load({
         'commandUi',
       ],
       apply(ctx) {
-        ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'access-permission dictionaries')
+        ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'readwrite-gate dictionaries')
         // Owns two custom properties, not a rule on host markup: the style element
         // is the only way the palette can follow the theme's light/dark attribute.
         try {
           installLevelPalette()
         } catch (cause) {
-          console.error('[access-permission] level palette install failed:', cause)
+          console.error('[readwrite-gate] level palette install failed:', cause)
         }
         const catalog = createCatalog(ctx)
-        ctx.effect(() => () => catalog.dispose(), 'access-permission catalog directory')
+        ctx.effect(() => () => catalog.dispose(), 'readwrite-gate catalog directory')
 
         /**
          * Run one `/access-allow` line and return its output text.
@@ -1691,7 +1691,7 @@ window.__ModuleLoader__.load({
 
         ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
           name: 'conversation.input.right',
-          id: 'access-permission-files',
+          id: 'readwrite-gate-files',
           order: 10,
           locale: NS,
           inject: (sessionId) => ({
@@ -1798,14 +1798,14 @@ window.__ModuleLoader__.load({
                     return runAllow(session.sessionId, `/access-allow add ${argument}`)
                   })
                   .catch((cause) => {
-                    console.error('[access-permission] system folder dialog unavailable, opening the built-in browser:', cause)
+                    console.error('[readwrite-gate] system folder dialog unavailable, opening the built-in browser:', cause)
                     requestBrowser(session.sessionId, 'read')
                   })
               },
             },
-          }), 'access-permission add-menu entry')
+          }), 'readwrite-gate add-menu entry')
         } catch (cause) {
-          console.error('[access-permission] add-menu entry registration failed:', cause)
+          console.error('[readwrite-gate] add-menu entry registration failed:', cause)
         }
       },
     }

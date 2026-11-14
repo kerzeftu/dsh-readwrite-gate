@@ -1,5 +1,5 @@
 /**
- * Pure decision logic of the access-permission plugin: tool-call classification,
+ * Pure decision logic of the readwrite-gate plugin: tool-call classification,
  * workspace containment, and the resulting gate decision. No Host API is touched
  * here so the rules stay unit-testable.
  *
@@ -13,7 +13,7 @@
  * cannot be read off its text (a script host, an unknown executable) is marked
  * `opaque`: it counts as a modification whose location is unknown, and the
  * caller decides what to do with a modification whose path it never saw.
- * @module @local/dsh-access-permission/functions
+ * @module dsh-readwrite-gate/functions
  */
 
 /** Every access level a session can be in. */

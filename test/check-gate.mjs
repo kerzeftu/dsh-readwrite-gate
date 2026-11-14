@@ -1,5 +1,5 @@
 /**
- * Host-side gate test for the access-permission plugin.
+ * Host-side gate test for the readwrite-gate plugin.
  *
  * It loads the REAL plugin entry with a fake cordis context and replays the
  * `tools/pre-execute` waterfall over the five rungs of the ladder, reading the

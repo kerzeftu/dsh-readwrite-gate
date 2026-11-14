@@ -175,7 +175,7 @@ const saturation = (hex) => {
   const min = Math.min(...channels)
   return max === 0 ? 0 : (max - min) / max
 }
-check('the palette style element reaches the page exactly once', styleNodes.length === 1 && paletteNode.selector === 'style[data-plugin-css="dsh-access-permission-level-palette"]', `${styleNodes.length} node(s)`)
+check('the palette style element reaches the page exactly once', styleNodes.length === 1 && paletteNode.selector === 'style[data-plugin-css="dsh-readwrite-gate-level-palette"]', `${styleNodes.length} node(s)`)
 check('the palette defines both yellows in both palettes', light !== null && dark !== null, paletteCss)
 check('read-only is the saturated neon of the pair, workspace-write the pale one', light !== null && dark !== null && saturation(light.read) > saturation(light.write) && saturation(dark.read) > saturation(dark.write), JSON.stringify({ light, dark }))
 check('the light palette darkens both yellows for legibility', light !== null && dark !== null && luminance(light.write) < luminance(dark.write) && luminance(light.read) < luminance(dark.read), JSON.stringify({ light, dark }))

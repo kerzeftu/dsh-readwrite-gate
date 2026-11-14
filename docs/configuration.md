@@ -5,8 +5,8 @@
 插件以 `link:` 方式装进某个 Harness profile（本机是 `<profile-dir>`）：
 
 1. `package.json` 的 `dependencies` 增加
-   `"@local/dsh-access-permission": "link:<repo-path>"`；
-2. `dsh.profile.bundles` 里加上 `@local/dsh-access-permission`；
+   `"dsh-readwrite-gate": "link:<repo-path>"`；
+2. `dsh.profile.bundles` 里加上 `dsh-readwrite-gate`；
 3. 重启 Harness。
 
 `link:` 是软链：浏览器拿到的就是仓库里的活文件，全盘只有一份副本。
@@ -24,7 +24,7 @@
 `cordis.patch.yml` 做两件事：
 
 1. **覆盖宿主预设表**（`- id: permission`）：`presets` 是整体替换，不是合并。键顺序就是菜单顺序。
-2. **插入插件**（`- insert: - id: access-permission`）：给出级别表与插件行为配置。
+2. **插入插件**（`- insert: - id: readwrite-gate`）：给出级别表与插件行为配置。
 
 ```yaml
 - id: permission
@@ -38,8 +38,8 @@
       danger-full-access: { sandbox: danger-full-access, approval: !!js "…", name: 完全访问, … }
 
 - insert:
-    - id: access-permission
-      name: '@local/dsh-access-permission'
+    - id: readwrite-gate
+      name: 'dsh-readwrite-gate'
       config:
         levels: { … }
         defaultLevel: no-access
@@ -111,8 +111,8 @@ profile 自己的 `cordis.patch.yml` 若也写了一段 `- id: permission`，它
 ## 桌面导出（本机习惯）
 
 ```bash
-mkdir -p ~/Desktop/dsh-access-permission-plugin
-cp -a <repo-path>/. ~/Desktop/dsh-access-permission-plugin/
+mkdir -p ~/Desktop/dsh-readwrite-gate-plugin
+cp -a <repo-path>/. ~/Desktop/dsh-readwrite-gate-plugin/
 ```
 
 COPY 不带 `.git`，需要历史的副本另外 `tar` 整个仓库。

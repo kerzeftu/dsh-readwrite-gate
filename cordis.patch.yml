@@ -17,7 +17,7 @@
 #    for reading alone.
 #    read-only / workspace-write / danger-full-access keep their original meaning
 #    and the environment-driven approval policy is preserved unchanged.
-# 2. The access-permission host plugin enforces the level on file tools and
+# 2. The readwrite-gate host plugin enforces the level on file tools and
 #    shells, and asks the user to authorize reads and modifications separately.
 # 3. Its browser half takes over the EXISTING `conversation.input.permission`
 #    seat, so the composer keeps exactly one permission control — now carrying a
@@ -60,8 +60,8 @@
         description: 可查看和修改任意路径的文件。
 
 - insert:
-    - id: access-permission
-      name: '@local/dsh-access-permission'
+    - id: readwrite-gate
+      name: 'dsh-readwrite-gate'
       config:
         # One entry per rung of the ladder above. `preset` ties the entry to the
         # permission preset with the same capability, and it is authoritative:

@@ -144,7 +144,7 @@ const isMine = (entry) => entry.component !== shipped && typeof entry.component 
   const claim = core.records.get('conversation.input.permission').entries.find(isMine)
   check('1. the claim uses a priority below the shipped 0', claim !== undefined && (claim.options.priority ?? 0) < 0, JSON.stringify(claim?.options.priority))
   check('1. the plugin wins the shadowing race (lowest renders)', isMine(core.winners('conversation.input.permission')[0] ?? {}))
-  check('1. the readable-files cell still registers', core.winners('conversation.input.right').some((e) => e.options.id === 'access-permission-files'))
+  check('1. the readable-files cell still registers', core.winners('conversation.input.right').some((e) => e.options.id === 'readwrite-gate-files'))
   check('1. the add-menu row still registers', commandRows.some((r) => r.name === 'extra-readable-files'))
 }
 
@@ -164,7 +164,7 @@ const isMine = (entry) => entry.component !== shipped && typeof entry.component 
   check('2. no deferred seat-takeover failure', core.failures.length === 0, core.failures.map((e) => e.message).join(' | '))
   check('2. the claim survived the late declaration', core.records.get('conversation.input.permission').entries.some(isMine))
   check('2. the plugin wins the shadowing race (lowest renders)', isMine(core.winners('conversation.input.permission')[0] ?? {}))
-  check('2. the readable-files cell registers too', core.winners('conversation.input.right').some((e) => e.options.id === 'access-permission-files'))
+  check('2. the readable-files cell registers too', core.winners('conversation.input.right').some((e) => e.options.id === 'readwrite-gate-files'))
   check('2. the add-menu row registers too', commandRows.some((r) => r.name === 'extra-readable-files'))
 }
 

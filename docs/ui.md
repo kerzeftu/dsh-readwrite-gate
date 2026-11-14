@@ -18,7 +18,7 @@
 | 座位 / 扩展点 | id | 关键参数 | 作用 |
 |---------------|----|----------|------|
 | `conversation.input.permission` | — | `priority: -1` | 替换宿主的权限控件 |
-| `conversation.input.right` | `access-permission-files` | `order: 10` | 「额外可读写文件」控件，排在权限控件右侧 |
+| `conversation.input.right` | `readwrite-gate-files` | `order: 10` | 「额外可读写文件」控件，排在权限控件右侧 |
 | `commandUi` | `extra-readable-files` | `available()` 返回布尔 | 加号菜单里的入口；`name` 必须 ASCII |
 
 `available()` 里**不能抛错**：加号菜单在合成候选时调用它，抛一次就让整个 `+` 菜单打不开（历史上出过）。
@@ -41,7 +41,7 @@
 | 完全访问 | `--dsw-alias-state-error-primary` | 红 |
 
 宿主主题没有黄系 alias，所以 `--ap-level-read` / `--ap-level-write` 由插件自己注入：
-`installLevelPalette()` 往 `<head>` 写一个 `<style data-plugin-css="dsh-access-permission-level-palette">`，
+`installLevelPalette()` 往 `<head>` 写一个 `<style data-plugin-css="dsh-readwrite-gate-level-palette">`，
 内容形如 `body{…}body[data-ds-dark-theme]{…}`（与宿主 `ThemePresenter` 同一套切换机制），消费者带 hex 兜底。
 
 **注意 `var(--x, fallback)` 的语义**：变量“未定义”才用兜底；变量“定义了但不是合法颜色”会让整条声明在计算值阶段失效，颜色回退成**继承值**（深色主题下是近白）。历史上一次“颜色反了”的排查就是因为这个。

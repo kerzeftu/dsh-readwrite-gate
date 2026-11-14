@@ -1,6 +1,6 @@
 # 项目概览
 
-`@local/dsh-access-permission` 是 DeepSeek Harness（DSH）的一个 Cordis 插件 bundle。
+`dsh-readwrite-gate` 是 DeepSeek Harness（DSH）的一个 Cordis 插件 bundle。
 它给 Harness 增加两件原本没有的能力：
 
 1. **两级新的权限档**——“无权限”（什么都看不到、改不了）和“工作区内读写”（工作区与临时目录里可读可改，出了这个范围要用户点头），并保留原有三档，组成五档阶梯。

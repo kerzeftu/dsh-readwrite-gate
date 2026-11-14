@@ -41,14 +41,14 @@
 
 ```js
 await ctx.userQuestions.ask({ agent, signal, questions: [{
-  id: grantQuestionId('dsh-access-permission/', kind, dirs),
+  id: grantQuestionId('dsh-readwrite-gate/', kind, dirs),
   header: kind === 'write' ? '请求修改授权' : '请求访问授权',
   detail: […],
   options: DIALOG_OPTIONS…,
 }] })
 ```
 
-- 问题 id 里编码了族与路径：`dsh-access-permission/<kind>|<encodeURIComponent(paths.join('\x01'))>`，由 `grantQuestionId` / `parseGrantId` 互转。
+- 问题 id 里编码了族与路径：`dsh-readwrite-gate/<kind>|<encodeURIComponent(paths.join('\x01'))>`，由 `grantQuestionId` / `parseGrantId` 互转。
 - 回答按标签或 value 归类（`answerOf`），允许自定义文本回答“不允许”这类中文标签。
 - 会话被销毁或 `signal` 取消时，`ask` 抛错 → 视为 `unavailable`，调用被拒（fail closed）。
 

@@ -1,5 +1,5 @@
 /**
- * Host half of the access-permission bundle.
+ * Host half of the readwrite-gate bundle.
  *
  * It adds two access levels on top of the deployment's permission presets:
  * `none` (no file may be read or modified) and `workspace` (only paths inside
@@ -13,7 +13,7 @@
  * user-only action: it lives on the plain `/access-allow` command, never on the
  * model-facing side.
  *
- * @module @local/dsh-access-permission
+ * @module dsh-readwrite-gate
  */
 import { readFileSync, statSync, realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -364,7 +364,7 @@ export function apply(ctx, config = {}) {
   const treatReadOnlyAsNoAccess = resolvedConfig.treatReadOnlyAsNoAccess
   const opaquePolicy = resolvedConfig.opaquePolicy
   const dialogTool = 'ask_user_question'
-  const questionPrefix = 'dsh-access-permission/'
+  const questionPrefix = 'dsh-readwrite-gate/'
   /** Comment marker a dispatcher uses to declare one task's write slice. */
   const dispatchScopeMarker = 'dsh-access-scope:'
 
@@ -1550,7 +1550,7 @@ export function apply(ctx, config = {}) {
         dispose()
         forget(session)
       }
-    }, 'access-permission level section')
+    }, 'readwrite-gate level section')
   }
 
   ctx.on('agent/created', (payload) => attachAgent(payload?.agent))

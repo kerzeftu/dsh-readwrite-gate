@@ -49,7 +49,7 @@
 
 ```bash
 mkdir -p ~/.dsh/profiles/ap-check
-# package.json: bundles = ["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app","@local/dsh-access-permission"]
+# package.json: bundles = ["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app","dsh-readwrite-gate"]
 # node_modules → 指向已有 profile 的 node_modules 软链
 dsh --profile ap-check --port 10999 --no-open
 ```
@@ -60,5 +60,5 @@ dsh --profile ap-check --port 10999 --no-open
 
 1. 当前级别与额外路径：`/access-allow list` 的完整输出。
 2. 出错那次的工具结果原文（含 `[access: …]` 文案）。
-3. `dsh --profile <p> --dump-config` 里 `permission` 与 `access-permission` 两段。
+3. `dsh --profile <p> --dump-config` 里 `permission` 与 `readwrite-gate` 两段。
 4. 插件版本（`package.json`）与 DSH 版本。
