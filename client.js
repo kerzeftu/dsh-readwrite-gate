@@ -1291,7 +1291,7 @@ window.__ModuleLoader__.load({
               h('span', { key: 'body', style: { display: 'block', minWidth: 0 } }, [
                 h('span', { key: 'label', style: {
                   display: 'block',
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: 500,
                   lineHeight: '18px',
                   color: itemMode.accent,
