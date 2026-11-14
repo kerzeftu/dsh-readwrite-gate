@@ -217,10 +217,10 @@ deployment can allow reading anywhere while still gating modification.
 
 ## Command
 
-`/access-permission` reports the current level, the preset it came from, and
-the standing grants. `/access-permission <full|workspace|none>` switches level
-by writing the configured preset through the permission-presets service; a level
-named by a level entry uses that entry's preset.
+There is no level command: the level is chosen in the composer's permission
+menu, which writes the matching preset through the permission-presets service
+(a level named by a level entry uses that entry's preset). `/access-allow list`
+prints the level in effect, the preset it came from and the extra paths.
 
 `/access-allow` manages the extra paths: `list`, `add <path>`, `add-write
 <path>`, `remove <path>`, `remove-read <path>`, `remove-write <path>`, `clear`.
@@ -228,6 +228,12 @@ A row ending in `/` is a directory and covers everything below it; the dialog
 records that form, and a hand-typed path keeps its trailing separator when it
 names a directory; `remove-read` on a writable row removes the row, because the
 write carries the read.
+
+An **always** answer is conversation-scoped and lives in memory: it covers the
+paths the dialog named (a directory covers everything below it), a dispatched
+task inherits the grants of the run it was dispatched from, and restarting the
+Harness forgets every such answer, so the next visit asks again. A **once**
+answer and a refusal never outlive the call they answered.
 
 Every path argument — `add`, `add-write` and the three `remove` forms alike —
 is recognized rather than taken literally: surrounding quotes

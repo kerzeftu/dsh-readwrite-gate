@@ -491,6 +491,12 @@ window.__ModuleLoader__.load({
       // per Windows drive mounted under /mnt. The host offers no "list mounts"
       // call, so the drives are read as the children of /mnt, once per open.
       const [places, setPlaces] = React.useState(null)
+      // Two request tickets: the allowlist read and the directory listing can
+      // each be overtaken by a newer request, and a late answer must not land on
+      // top of it (a stale read used to clear a fresh list, and a stale listing
+      // used to switch the browser to the family the user had already left).
+      const refreshTicket = React.useRef(0)
+      const listingTicket = React.useRef(0)
       const currentValue = typeof selection?.currentValue === 'string' ? selection.currentValue : undefined
       const restricted = currentValue !== undefined && restrictedPreset(currentValue)
       // The count follows the authorization dialog, not the click: the host records
@@ -516,20 +522,26 @@ window.__ModuleLoader__.load({
        * Re-read the allowlist from the host.
        * @returns the loaded entries.
        */
-      const refresh = () => Promise.resolve(props.listAllowed())
-        .then((result) => {
-          if (result !== null && Array.isArray(result.entries)) {
-            setEntries(result.entries)
-            setError(result.failure ?? null)
-          } else if (typeof result === 'string') {
-            setError(result)
-          }
-          return result
-        })
-        .catch((cause) => {
-          setError(cause instanceof Error ? cause.message : String(cause))
-          return null
-        })
+      const refresh = () => {
+        const ticket = (refreshTicket.current += 1)
+        return Promise.resolve(props.listAllowed())
+          .then((result) => {
+            // A newer read already answered; this answer is older than it.
+            if (ticket !== refreshTicket.current) return result
+            if (result !== null && Array.isArray(result.entries)) {
+              setEntries(result.entries)
+              setError(result.failure ?? null)
+            } else if (typeof result === 'string') {
+              setError(result)
+            }
+            return result
+          })
+          .catch((cause) => {
+            if (ticket !== refreshTicket.current) return null
+            setError(cause instanceof Error ? cause.message : String(cause))
+            return null
+          })
+      }
 
       React.useEffect(() => {
         if (currentValue === undefined) return undefined
@@ -553,12 +565,17 @@ window.__ModuleLoader__.load({
         const onKeyDown = (event) => {
           if (event.key === 'Escape') close()
         }
+        // A named handler so the listener is removed again: an anonymous
+        // `{ once: true }` listener is dropped only when it fires, so every open
+        // that closed by clicking left one behind.
+        const onResize = () => close()
         document.addEventListener('pointerdown', close, true)
         document.addEventListener('keydown', onKeyDown, true)
-        window.addEventListener('resize', () => close(), { once: true })
+        window.addEventListener('resize', onResize)
         return () => {
           document.removeEventListener('pointerdown', close, true)
           document.removeEventListener('keydown', onKeyDown, true)
+          window.removeEventListener('resize', onResize)
         }
       }, [open, browse === null])
 
@@ -634,8 +651,12 @@ window.__ModuleLoader__.load({
        * @returns nothing.
        */
       const loadListing = (family, path) => {
+        const ticket = (listingTicket.current += 1)
         Promise.resolve(path === null ? props.listDirectory(null) : props.listDirectory(path))
           .then((result) => {
+            // The browser was reopened (or paged again) while this ran; its
+            // answer names neither the family nor the level the user sees now.
+            if (ticket !== listingTicket.current) return
             if (result !== null && typeof result === 'object' && result.listing !== undefined) {
               // Merge instead of replacing: the browser is positioned from the
               // anchor captured when it opened, and a replacement object without
@@ -658,6 +679,7 @@ window.__ModuleLoader__.load({
             }))
           })
           .catch((cause) => {
+            if (ticket !== listingTicket.current) return
             setBrowse((state) => (state === null ? state : {
               ...state,
               busy: false,
@@ -1169,11 +1191,9 @@ window.__ModuleLoader__.load({
         }
       }, [open])
 
-      // This registration replaces the shipped control, so it must never render
-      // nothing while the session's permission capability is present. Only a
-      // session that genuinely has no permission projection hides the seat; an
-      // unsettled catalog read falls back to the built-in table below.
-      if (currentValue === undefined) return null
+      // A session without a permission projection renders nothing; the check
+      // sits below, after every hook, so the hook order never depends on whether
+      // that projection has settled yet.
       const served = catalog !== null && Array.isArray(catalog.options) ? catalog.options : []
       const known = new Set(served.map((option) => option.value))
       const options = served.length === 0
@@ -1367,6 +1387,12 @@ window.__ModuleLoader__.load({
           try { if (previous !== null && previous.isConnected !== false) previous.focus() } catch {}
         }
       }, [confirming])
+
+      // This registration replaces the shipped control, so it must never render
+      // nothing while the session's permission capability is present. Only a
+      // session that genuinely has no permission projection hides the seat; an
+      // unsettled catalog read falls back to the built-in table above.
+      if (currentValue === undefined) return null
 
       const closeConfirmation = () => {
         setAcknowledged(false)
@@ -1613,6 +1639,7 @@ window.__ModuleLoader__.load({
       // touches a Remote namespace declares it the same way.
       inject: [
         'slots',
+        'sessions',
         'locale',
         'remote',
         'remote.commands',
