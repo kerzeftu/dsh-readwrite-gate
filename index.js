@@ -80,11 +80,16 @@ const TEMP_AREA = (() => {
 
 /**
  * Whether a path lives in the platform temp area.
+ *
+ * Only an absolute path can be inside: a relative word has no home yet, and
+ * reading it against the temp root made `./secret.txt` in an outside working
+ * directory look like `/tmp/secret.txt`.
  * @param path - the absolute path to test.
  * @returns `true` when a temp root contains it.
  */
 function insideTempArea(path) {
   if (typeof path !== 'string' || path === '') return false
+  if (!(path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\'))) return false
   for (const root of TEMP_AREA) {
     try {
       if (containsPath(path, root, root).contained) return true
@@ -93,6 +98,54 @@ function insideTempArea(path) {
     }
   }
   return false
+}
+
+/**
+ * Resolve one path to an absolute path against the base relative words use.
+ * @param path - a path the classifier recorded.
+ * @param base - the directory relative paths resolve against.
+ * @returns the absolute path, or `undefined` when the word cannot be placed.
+ */
+function absolutePathOf(path, base) {
+  if (typeof path !== 'string' || path === '') return undefined
+  // `~` is the shell's business; without expansion it names nothing this gate
+  // can place, so it stays treated as outside.
+  if (path.startsWith('~')) return undefined
+  if (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')) return path
+  if (typeof base !== 'string' || base === '') return undefined
+  return `${base.replace(/[\\/]+$/, '')}/${path}`
+}
+
+/** Real paths seen so far, so one tool call's symlink resolution is not repeated. */
+const canonicalCache = new Map()
+
+/**
+ * The real path behind one absolute path, with every existing ancestor resolved.
+ *
+ * Containment on the lexical path is not the same as containment on disk: a
+ * symlink inside the workspace that points outside it would otherwise read as
+ * inside, and the read side has no platform fence behind it.
+ * @param path - an absolute path, which may not exist yet.
+ * @returns the canonical path, or the input when nothing resolves.
+ */
+function canonicalPathOf(path) {
+  if (typeof path !== 'string' || path === '') return path
+  const cached = canonicalCache.get(path)
+  if (cached !== undefined) return cached
+  if (canonicalCache.size > 4096) canonicalCache.clear()
+  let result = path
+  try {
+    result = realpathSync(path)
+  } catch {
+    const boundary = path.lastIndexOf('/')
+    if (boundary > 0) {
+      const head = path.slice(0, boundary)
+      const real = canonicalPathOf(head)
+      if (real !== head) result = `${real}${path.slice(boundary)}`
+    }
+  }
+  canonicalCache.set(path, result)
+  return result
 }
 
 /**
@@ -617,18 +670,37 @@ export function apply(ctx, config = {}) {
       const own = inheritanceRoot(session)
       const sources = own === session ? [session] : [own, session]
       for (const source of sources) {
+        // A dispatched task runs inside the run that authorized the path, so the
+        // parent's live grants are copied in. Its cache is authoritative: this
+        // plugin asks through the question service, whose answer never becomes a
+        // `tool/call` record, so a log replay cannot reproduce it.
+        const inherited = liveGrants.get(String(source.id))
+        if (inherited !== undefined) {
+          for (const [path, entry] of inherited) {
+            const target = entries.get(path) ?? { read: false, write: false }
+            target.read = target.read === true || entry.read === true
+            target.write = target.write === true || entry.write === true
+            target.directory = target.directory === true || entry.directory === true
+            entries.set(path, target)
+          }
+          continue
+        }
         const replayed = readGrants(source, dialogTool, questionPrefix).granted
+        // The log keeps whatever spelling the dialog asked about; the row is the
+        // folded path, so a grant recorded from `a/../b` matches `b` here.
         for (const dir of replayed.read) {
-          const entry = entries.get(dir.path) ?? { read: false, write: false }
+          const path = canonicalPathOf(dir.path)
+          const entry = entries.get(path) ?? { read: false, write: false }
           entry.read = true
           entry.directory = entry.directory === true || dir.directory === true
-          entries.set(dir.path, entry)
+          entries.set(path, entry)
         }
         for (const dir of replayed.write) {
-          const entry = entries.get(dir.path) ?? { read: false, write: false }
+          const path = canonicalPathOf(dir.path)
+          const entry = entries.get(path) ?? { read: false, write: false }
           entry.write = true
           entry.directory = entry.directory === true || dir.directory === true
-          entries.set(dir.path, entry)
+          entries.set(path, entry)
         }
       }
     } catch {
@@ -733,19 +805,32 @@ export function apply(ctx, config = {}) {
   }
 
   /**
-   * Release the per-session dialog state when a session ends.
+   * Release the per-session dialog queue when an agent goes away.
+   *
+   * The grants stay: agents are re-attached for the same session, and the user's
+   * answers — including removals that live only in memory — must survive that.
+   * @param session - the session whose agent was disposed.
+   */
+  function forgetDialog(session) {
+    if (session === undefined) return
+    askQueues.delete(String(session.id))
+  }
+
+  /**
+   * Release every per-session map once the conversation itself is gone.
    * @param session - the disposed session.
    */
-  function forget(session) {
+  function forgetSession(session) {
     if (session === undefined) return
     const key = String(session.id)
     liveGrants.delete(key)
     askQueues.delete(key)
     readAllow.delete(key)
+
   }
 
-  ctx.on('session/disposed', (session) => forget(session))
-  ctx.on('agent/disposed', (payload) => forget(payload?.agent?.session))
+  ctx.on('session/disposed', (session) => forgetSession(session))
+  ctx.on('agent/disposed', (payload) => forgetDialog(payload?.agent?.session))
 
   /**
    * The entries of one list that cover every given path, all or nothing.
@@ -773,10 +858,27 @@ export function apply(ctx, config = {}) {
    */
   function familyState(session, root, scopeBase, kind, paths) {
     const unique = [...new Set(paths)]
-    // The temp area counts as inside: the platform sandbox writes there in the
-    // same mode, so a dialog about it would only ask for what is already allowed.
-    const outside = unique.filter((path) => !insideTempArea(path)
-      && (root === undefined || !containsPath(path, root, scopeBase).contained))
+    const realRoot = root === undefined ? undefined : canonicalPathOf(root)
+    // Every word is placed against the directory the call runs in before any
+    // containment test: a relative word has no meaning on its own, and testing
+    // it against the temp root first swallowed outside working directories.
+    const outside = []
+    for (const path of unique) {
+      const absolute = absolutePathOf(path, scopeBase)
+      if (absolute === undefined) {
+        outside.push(path)
+        continue
+      }
+      // Canonical, folded paths: `..` must not survive into a stored grant, and
+      // a symlink inside the workspace that points outside it must not read as
+      // inside. The same folding runs on a typed removal, so both name one row.
+      const folded = canonicalPathOf(absolute)
+      // The temp area counts as inside: the platform sandbox writes there in the
+      // same mode, so a dialog about it would only ask for what is already allowed.
+      if (insideTempArea(folded)) continue
+      if (realRoot !== undefined && containsPath(folded, realRoot, realRoot).contained) continue
+      outside.push(folded)
+    }
     // The read allowlist admits named outsiders without a dialog. It is
     // read-only by construction: a modification still goes through the gate.
     const admittedBy = session === undefined || kind !== 'read'
@@ -824,10 +926,12 @@ export function apply(ctx, config = {}) {
    * @returns the verdict, or `undefined` when the call touches no files.
    */
   function classify(agent, name, args) {
-    const operation = classifyTool(name, args)
-    if (operation === undefined) return undefined
     const session = sessionOf(agent)
     const root = session === undefined ? undefined : workspaceRoot(session)
+    // A search tool with no path reads the workspace root, so the classifier
+    // needs the root it would search before it can say whether it touched files.
+    const operation = classifyTool(name, args, { root })
+    if (operation === undefined) return undefined
     const scopeBase = scopeBaseOf(args, root)
     const opaque = operation.opaque === true
     const readPaths = [
@@ -1082,7 +1186,23 @@ export function apply(ctx, config = {}) {
         if (scope === 'anywhere') continue
         const dirs = grantTargetsOf(side.kind, side.outside, operation)
         const outcome = await askAuthorization(session, exec.agent, side.kind, detail, dirs, exec.signal)
-        if (outcome === 'allow-once' || outcome === 'allow-always') continue
+        if (outcome === 'allow-once' || outcome === 'allow-always') {
+          // The dialog is asynchronous, and the user may have narrowed the level
+          // while it was open. A `deny` level reached afterwards refuses the call
+          // it was asked about, so the answer never outlives the level it was
+          // given under.
+          const afterwards = resolveLevel(session)
+          const afterDefinition = afterwards.definition
+          const afterLevel = afterDefinition?.level ?? afterwards.level
+          const afterScope = side.kind === 'write' ? afterDefinition?.writeScope : afterDefinition?.readScope
+          if (afterLevel === 'none') {
+            return { kind: 'deny', reason: refusal(side.kind, detail, 'level-none') }
+          }
+          if (afterScope === 'none') {
+            return { kind: 'deny', reason: refusal(side.kind, detail, 'level-scope') }
+          }
+          continue
+        }
         return {
           kind: 'deny',
           reason: refusal(side.kind, detail, outcome === 'unavailable' ? 'unavailable' : 'rejected'),
@@ -1266,16 +1386,16 @@ export function apply(ctx, config = {}) {
       }
       if (dropRead) {
         setReadAllow(session, configured.filter((entry) => canonicalPath(entry) !== key))
-        if (grantKey !== undefined) {
-          const entry = grants.get(grantKey)
-          entry.read = false
-          if (entry.write !== true) grants.delete(grantKey)
-        }
       }
-      if (dropWrite && grantKey !== undefined) {
+      if (grantKey !== undefined) {
         const entry = grants.get(grantKey)
-        entry.write = false
-        if (entry.read !== true) grants.delete(grantKey)
+        // The read side may already have deleted the row when nothing was left
+        // of it, so the write side reads it again instead of relying on it.
+        if (entry !== undefined) {
+          if (dropRead) entry.read = false
+          if (dropWrite) entry.write = false
+          if (entry.read !== true && entry.write !== true) grants.delete(grantKey)
+        }
       }
       const remaining = extraRowsOf(session).find((entry) => canonicalPath(entry.path) === key)
       return {

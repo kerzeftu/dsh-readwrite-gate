@@ -38,6 +38,51 @@ const READ_ONLY_EXECUTABLES = new Set([
 ])
 
 /**
+ * Read-only executables whose positional operands are files even when they are
+ * bare names (`cat secret`): a filename needs neither an extension nor a
+ * separator. Every other read-only executable keeps the lexical test, because
+ * its operands are patterns, formats or identifiers (`grep secret`, `printf %s`).
+ */
+const FILE_READ_OPERANDS = new Set([
+  'cat', 'head', 'tail', 'tac', 'less', 'more', 'wc', 'nl', 'od', 'xxd',
+  'strings', 'file', 'stat', 'md5sum', 'sha1sum', 'sha256sum', 'sha512sum',
+  'cksum', 'base64', 'diff', 'cmp', 'comm', 'column', 'jq', 'yq', 'ls',
+  'dir', 'vdir', 'du', 'realpath', 'readlink', 'tree', 'fd', 'iconv',
+])
+
+/** Options whose next word is a value, never an operand. */
+const VALUE_OPTIONS = new Set([
+  '-n', '-c', '-d', '-t', '-k', '-o', '-m', '--max-count', '--bytes',
+  '--lines', '--delimiter', '--output', '--separator', '--pattern',
+  '--exclude', '--include', '--color', '--format', '--width', '--tab-size',
+  '--block-size', '--time-style', '--quoting-style',
+])
+
+/**
+ * Whether the word after an option is that option's value rather than a file.
+ *
+ * Only a bare value counts: `head -n 5 file` consumes `5`, while `rm -f victim`
+ * keeps `victim` because `-f` is a flag and `victim` is an operand.
+ * @param option - the option word.
+ * @param next - the word that follows it.
+ * @returns `true` when `next` is the option's value.
+ */
+function optionTakesValue(option, next) {
+  if (!VALUE_OPTIONS.has(option)) return false
+  if (next === undefined) return false
+  const value = String(next.value ?? '')
+  if (value === '' || value.startsWith('-')) return false
+  return !looksLikePath(value)
+}
+
+/**
+ * Read-only tools whose omitted path means the session workspace itself. The
+ * host's `glob` and `grep` search the workspace when no path is given, so an
+ * empty argument list is a read of the root, not a call that touches nothing.
+ */
+const IMPLICIT_ROOT_TOOLS = new Set(['glob', 'grep', 'list_dir'])
+
+/**
  * How to read the write targets out of one executable's arguments.
  *
  * `all`     — every path argument is a write target.
@@ -197,6 +242,24 @@ export function isNeutralPath(path) {
  */
 export function isUrlLike(word) {
   return typeof word === 'string' && /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(word)
+}
+
+/**
+ * The local path behind one `file://` address, when the word is one.
+ *
+ * `file:///etc/passwd` opens a local file; classifying it as a remote URL is
+ * what let `curl file:///etc/passwd` pass as "touches no path".
+ * @param word - one shell word or tool argument.
+ * @returns the decoded absolute path, or `undefined` for every other scheme.
+ */
+export function fileUrlPath(word) {
+  if (typeof word !== 'string') return undefined
+  const match = /^file:\/\/(?:localhost)?(.*)$/i.exec(word)
+  if (match === null) return undefined
+  let raw = match[1]
+  try { raw = decodeURIComponent(raw) } catch { /* keep the literal text */ }
+  if (raw === '') return '/'
+  return raw.startsWith('/') ? raw : `/${raw}`
 }
 
 export function looksLikePath(word) {
@@ -552,6 +615,10 @@ function runCommand(tokens, state) {
       index = cursor
     }
   }
+  // A leading `VAR=value` binds for the rest of the line, so `X=/etc/passwd;
+  // cat "$X"` names the same file the assignment wrote down — including the
+  // line that only assigns, which ends here without running a command.
+  for (const token of assignments) if (isAssignment(token)) rememberAssignment(token, state)
   if (index >= tokens.length) return
   let executable = baseName(tokens[index].value)
   let guard = 0
@@ -654,7 +721,17 @@ function runCommand(tokens, state) {
     return
   }
   if (READ_ONLY_EXECUTABLES.has(exe) || SHELL_BUILTINS.has(exe)) {
-    for (const token of args) recordWord(token, 'read', state)
+    // `export X=…`, `local X=…` and friends bind a variable for the rest of the
+    // line even though the builtin itself reads nothing.
+    if (['export', 'local', 'declare', 'readonly', 'typeset', 'set'].includes(exe)) {
+      for (const token of args) if (isAssignment(token)) rememberAssignment(token, state)
+    }
+    const operands = FILE_READ_OPERANDS.has(exe)
+    for (let cursor = 0; cursor < args.length; cursor += 1) {
+      const token = args[cursor]
+      if (operands && optionTakesValue(token.value, args[cursor + 1])) { cursor += 1; continue }
+      recordWord(token, 'read', state, { bare: operands })
+    }
     return
   }
   // An unknown executable's intent cannot be read off its name: it may write
@@ -733,29 +810,34 @@ function positionalAfterOptions(args, valueOptions) {
 
 /** Apply one executable's write rule to its arguments. */
 function applyWriteRule(exe, rule, args, state) {
-  const paths = []
-  const others = []
-  for (const token of args) {
-    const value = token.value
+  // Operands in argument order: a rule that names one target has to know which
+  // argument comes last, and `cp /etc/passwd out` reads one file and writes
+  // another only once the copy's source is not mistaken for its destination.
+  const ordered = []
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index]
     if (isAssignment(token)) continue
-    if (value.startsWith('-')) continue
-    if (looksLikePath(value) || token.quoted || value.includes('/')) paths.push(token)
-    else if (rule === 'all' || rule === 'dest' || rule === 'first') others.push(token)
+    if (token.value.startsWith('-')) {
+      if (optionTakesValue(token.value, args[index + 1])) index += 1
+      continue
+    }
+    ordered.push(token)
   }
+  const paths = [...ordered]
   if (rule === 'all') {
     state.mayWrite = true
     // These remove or create directories themselves, so their operands are
     // directory targets: an authorization for one keeps the whole subtree.
     const recursive = args.some((token) => token.value === '--recursive' || /^-[A-Za-z]*[rR]/.test(token.value))
     const directory = exe === 'mkdir' || exe === 'rmdir' || (exe === 'rm' && recursive)
-    for (const token of [...paths, ...others]) recordWord(token, 'write', state, { directory })
+    for (const token of paths) recordWord(token, 'write', state, { directory, bare: true })
     return
   }
   if (rule === 'dest') {
     state.mayWrite = true
     const target = paths.pop()
-    for (const token of paths) recordWord(token, 'read', state)
-    if (target !== undefined) recordWord(target, 'write', state)
+    for (const token of paths) recordWord(token, 'read', state, { bare: true })
+    if (target !== undefined) recordWord(target, 'write', state, { bare: true })
     else {
       state.reasons.add('missing-destination')
       state.opaque = true
@@ -765,16 +847,26 @@ function applyWriteRule(exe, rule, args, state) {
   if (rule === 'first') {
     state.mayWrite = true
     const target = paths.shift()
-    if (target !== undefined) recordWord(target, 'write', state)
-    for (const token of paths) recordWord(token, 'read', state)
+    if (target !== undefined) recordWord(target, 'write', state, { bare: true })
+    for (const token of paths) recordWord(token, 'read', state, { bare: true })
     return
   }
   if (rule === 'of') {
     state.mayWrite = true
-    const value = args.find((token) => token.value.startsWith('of='))
-    if (value !== undefined) recordWord({ type: 'word', value: value.value.slice(3), quoted: false }, 'write', state)
+    const output = args.find((token) => token.value.startsWith('of='))
+    if (output !== undefined) {
+      recordWord({ type: 'word', value: output.value.slice(3), quoted: false }, 'write', state, { bare: true })
+    }
+    // `dd if=/etc/passwd` reads that file; dropping the input half is what made
+    // an outside read look like a write with no source.
+    const input = args.find((token) => token.value.startsWith('if='))
+    if (input !== undefined) {
+      recordWord({ type: 'word', value: input.value.slice(3), quoted: false }, 'read', state, { bare: true })
+    }
     for (const token of args) {
-      if (!token.value.startsWith('if=') && !token.value.startsWith('of=')) recordWord(token, 'read', state)
+      if (token.value.startsWith('if=') || token.value.startsWith('of=')) continue
+      if (token.value.startsWith('-')) continue
+      recordWord(token, 'read', state, { bare: true })
     }
     return
   }
@@ -784,10 +876,9 @@ function applyWriteRule(exe, rule, args, state) {
       state.mayWrite = true
       recordWord({ type: 'word', value, quoted: false }, 'write', state)
     }
-    for (const token of args) {
-      if (token.value.startsWith('-')) continue
+    for (const token of paths) {
       if (value !== undefined && token.value === value) continue
-      recordWord(token, 'read', state)
+      recordWord(token, 'read', state, { bare: true })
     }
     return
   }
@@ -902,6 +993,9 @@ function rememberAssignment(token, state) {
 /** Record one word's expanded paths in one family. */
 function recordWord(token, side, state, options = {}) {
   const directory = options.directory === true
+  // `bare` marks an operand an executable treats as a file by position, so a
+  // name without an extension or a separator still counts (`cat secret`).
+  const bare = options.bare === true
   const raw = String(token?.value ?? '')
   // `find -exec` placeholders and the separators around them are not paths: a
   // lone `{}` would otherwise expand to its literal prefix, the working directory.
@@ -910,11 +1004,15 @@ function recordWord(token, side, state, options = {}) {
     if (value === '' || value === '-' || value === '--') continue
     if (value === '{}' || value === '{' || value === '}' || value === '+' || value === ';') continue
     if (isNeutralPath(value)) continue
-    if (isUrlLike(value)) continue
+    // A `file://` address points at a local path; every other scheme is remote.
+    const local = fileUrlPath(value)
+    if (local === undefined && isUrlLike(value)) continue
+    const target = local ?? value
+    if (bare && (target.startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(target))) continue
     // Reading a device is not a question about the workspace; writing one is.
-    if (side === 'read' && value.startsWith('/dev/')) continue
-    if (!looksLikePath(value)) continue
-    const resolved = resolveText(value, state.cwd)
+    if (side === 'read' && target.startsWith('/dev/')) continue
+    if (!bare && !looksLikePath(target)) continue
+    const resolved = local !== undefined ? local : resolveText(target, state.cwd)
     state[side].push(resolved)
     if (side === 'write' && directory) state.directoryWrites.add(resolved)
   }
@@ -996,14 +1094,27 @@ function resolveText(path, cwd) {
 export function extractPaths(args, options = {}) {
   const includeCwd = options.includeCwd !== false
   const found = []
-  for (const [key, value] of Object.entries(args ?? {})) {
-    if (!PATH_KEYS.has(key)) continue
-    if (key === 'cwd' && !includeCwd) continue
-    if (typeof value === 'string' && value !== '') found.push(value)
-    else if (Array.isArray(value)) {
-      for (const item of value) if (typeof item === 'string' && item !== '') found.push(item)
+  const walk = (value, key, depth) => {
+    if (depth > 4 || value === null || value === undefined) return
+    if (PATH_KEYS.has(key)) {
+      if (key === 'cwd' && !includeCwd) return
+      if (typeof value === 'string' && value !== '') { found.push(value); return }
+      if (Array.isArray(value)) {
+        for (const item of value) if (typeof item === 'string' && item !== '') found.push(item)
+        return
+      }
+    }
+    // Tool arguments nest: `present { files: [{ path }] }` names a path one
+    // level down, and reading only the top level made it look path-free.
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, key, depth + 1)
+      return
+    }
+    if (typeof value === 'object') {
+      for (const [childKey, child] of Object.entries(value)) walk(child, childKey, depth + 1)
     }
   }
+  for (const [key, value] of Object.entries(args ?? {})) walk(value, key, 0)
   return found
 }
 
@@ -1011,10 +1122,12 @@ export function extractPaths(args, options = {}) {
  * Classify one tool call by the paths it really touches.
  * @param name - wire tool name.
  * @param args - parsed tool arguments.
+ * @param options - `root`: the session workspace root, which a search tool with
+ * no path argument reads.
  * @returns The operation family with its read and write paths, or `undefined`
  * when the call touches no files.
  */
-export function classifyTool(name, args) {
+export function classifyTool(name, args, options = {}) {
   const shape = TOOL_SHAPES[name]
   if (shape === 'shell') {
     const command = typeof args?.command === 'string' ? args.command : typeof args?.cmd === 'string' ? args.cmd : ''
@@ -1036,6 +1149,21 @@ export function classifyTool(name, args) {
   }
   if (shape === 'read' || shape === 'write') {
     const paths = extractPaths(args)
+    // A search tool without a path searches the workspace; that is a read of
+    // the root, not a call that names nothing.
+    if (paths.length === 0 && shape === 'read') {
+      const root = options.root
+      if (typeof root === 'string' && root !== '' && IMPLICIT_ROOT_TOOLS.has(name)) {
+        return {
+          kind: 'read',
+          reason: `${name}:implicit-root`,
+          paths: [root],
+          readPaths: [root],
+          writePaths: [],
+          opaque: false,
+        }
+      }
+    }
     return {
       kind: shape,
       reason: `${name}:declared`,
@@ -1082,7 +1210,9 @@ export function containsPath(path, root, base) {
     return { contained: false, reason: 'unresolvable-path', resolved: path }
   }
   const windows = /^[A-Za-z]:[\\/]/.test(root) || root.startsWith('\\\\')
-  const separator = /[\\/]+/
+  // A backslash separates only on Windows: on POSIX it is an ordinary filename
+  // character, and splitting on it made `/etc\passwd` look like `/etc/passwd`.
+  const separator = windows ? /[\\/]+/ : /\//
   const isAbsolute = (value) => value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
   const fold = (value) => {
     const parts = value.split(separator)
@@ -1099,13 +1229,14 @@ export function containsPath(path, root, base) {
     const prefix = value.startsWith('/') ? '/' : ''
     return `${prefix}${joined}`
   }
-  const resolve = (value) => fold(value).replace(/[\\/]+$/, '')
+  const resolve = (value) => fold(value).replace(windows ? /[\\/]+$/ : /\/+$/, '')
   const compare = (value) => (windows ? value.toLowerCase() : value)
   const rootResolved = compare(resolve(root))
   const baseResolved = compare(resolve(typeof base === 'string' && base !== '' ? base : root))
   const resolved = compare(isAbsolute(path) ? resolve(path) : resolve(`${baseResolved}/${path}`))
   if (resolved === rootResolved) return { contained: true, resolved }
-  if (resolved.startsWith(`${rootResolved}/`) || resolved.startsWith(`${rootResolved}\\`)) {
+  if (resolved.startsWith(`${rootResolved}${windows ? '\\' : '/'}`)
+    || (windows && resolved.startsWith(`${rootResolved}/`))) {
     return { contained: true, resolved }
   }
   return { contained: false, resolved, reason: 'outside-workspace' }

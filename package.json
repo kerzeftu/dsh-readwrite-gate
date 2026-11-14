@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-access-permission",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "type": "module",
   "description": "Adds no-access and read-and-write-inside-workspace permission levels with a separate read/write authorization dialog.",
