@@ -1,0 +1,111 @@
+# Access-permission bundle.
+#
+# 1. The permission-presets table keeps the deployment's original three presets
+#    and ADDS the two requested access levels. The five presets form one ladder,
+#    ordered by how much they grant:
+#      - 无权限 (no-access)         : nothing may be viewed or modified
+#      - 工作区内编辑 (workspace-access) : the session workspace is readable and
+#                                       modifiable; outside reads ask, outside
+#                                       modifications stay refused
+#      - 只读 (read-only)           : any path is readable; every modification is refused
+#      - 工作区可写 (workspace-write) : any path is readable, modification is
+#                                       limited to the workspace
+#      - 完全访问 (danger-full-access): any path is readable and modifiable
+#    The rungs are ordered by how much they grant, not nested sets: 工作区内编辑
+#    reaches the workspace only, while 只读 reaches every path for reading alone.
+#    read-only / workspace-write / danger-full-access keep their original meaning
+#    and the environment-driven approval policy is preserved unchanged.
+# 2. The access-permission host plugin enforces the level on file tools and
+#    shells, and asks the user to authorize reads and modifications separately.
+# 3. Its browser half takes over the EXISTING `conversation.input.permission`
+#    seat, so the composer keeps exactly one permission control — now carrying a
+#    per-mode symbol, colour and type treatment.
+
+- id: permission
+  name: '@deepseek-ai/dsh-permission-presets'
+  config:
+    presets:
+      no-access:
+        sandbox: read-only
+        approval: ask
+        name: 无权限
+        description: 不可查看、不可修改任何文件。
+      # The sandbox is workspace-write: this level grants modifications inside
+      # the workspace, so the platform fence has to let them through. It still
+      # fences every modification outside the workspace, and it never fences
+      # reads — this plugin owns the read side. A write outside the workspace
+      # reaches the authorization dialog first and is then refused by the fence,
+      # exactly as at 工作区可写.
+      workspace-access:
+        sandbox: workspace-write
+        approval: ask
+        name: 工作区内编辑
+        description: 可查看和修改工作区内的文件；区外读取需逐次授权，区外修改仍会被拒绝。
+      read-only:
+        sandbox: read-only
+        approval: ask
+        name: 只读
+        description: 可查看任意路径的文件；任何修改都会被拒绝。
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+        name: 工作区可写
+        description: 可查看任意路径的文件；修改限制在工作区内，区外修改需逐次授权。
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: !!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"
+        name: 完全访问
+        description: 可查看和修改任意路径的文件。
+
+- insert:
+    - id: access-permission
+      name: '@local/dsh-access-permission'
+      config:
+        # One entry per rung of the ladder above. `preset` ties the entry to the
+        # permission preset with the same capability, and it is authoritative:
+        # an entry naming its preset overwrites any other preset mapping, so the
+        # preset and this table can never disagree about what a level means.
+        #   readScope  : anywhere | workspace | none  (none refuses every read)
+        #   writeScope : anywhere | workspace | none  (none refuses every write)
+        # `workspace` means "inside the session workspace; outside paths pause
+        # and ask the user, and reads and writes are asked separately". A write
+        # outside is asked for and then refused by the preset's sandbox.
+        levels:
+          no-access:
+            preset: no-access
+            level: none
+            label: 无权限
+            description: 不可查看、不可修改任何文件。
+          workspace-edit:
+            preset: workspace-access
+            level: workspace
+            readScope: workspace
+            writeScope: workspace
+            label: 工作区内编辑
+            description: 可查看和修改工作区内的文件；区外读取会弹出授权页，区外修改仍会被拒绝。
+          read-only-access:
+            preset: read-only
+            level: workspace
+            readScope: anywhere
+            writeScope: none
+            label: 只读
+            description: 可查看任意路径的文件；任何修改都会被拒绝。
+          workspace-write-access:
+            preset: workspace-write
+            level: workspace
+            readScope: anywhere
+            writeScope: workspace
+            label: 工作区可写
+            description: 可查看任意路径的文件；修改限制在工作区内，区外修改会弹出授权页。
+          full-access:
+            preset: danger-full-access
+            level: full
+            label: 完全访问
+            description: 可读取和修改任意路径的文件。
+        # Fail closed: an unmapped preset lands on the level that grants nothing.
+        defaultLevel: no-access
+        treatReadOnlyAsNoAccess: false
+        # How a command whose own paths the analyzer cannot read (a script, or an
+        # unknown program) is judged: `directory` admits it when the directory it
+        # runs in lies inside the scope, `deny` refuses it outright.
+        opaquePolicy: directory
