@@ -14,18 +14,21 @@ and the preset's sandbox:
 | Picker row | Preset | Reading files | Modifying files |
 |---|---|---|---|
 | 无权限 (added) | `no-access` | Denied everywhere, including inside the workspace | Denied everywhere |
-| 工作区内编辑 (added) | `workspace-access` | Inside the workspace allowed; outside asks the user | Inside the workspace allowed; outside refused |
+| 工作区内读写 (added) | `workspace-access` | Inside the workspace and the temp area (`/tmp`) allowed; outside asks the user | Inside the workspace and the temp area allowed; outside refused |
 | 只读 (original) | `read-only` | Allowed anywhere | Denied everywhere |
-| 工作区可写 (original) | `workspace-write` | Allowed anywhere | Inside the workspace allowed; outside asks the user |
+| 工作区内编辑 (added icon seat) | `workspace-write` | Allowed anywhere | Inside the workspace and the temp area allowed; outside asks the user |
 | 完全访问 (original) | `danger-full-access` | Allowed | Allowed |
 
 A level's *name* states exactly what it grants: `workspace-access` reads and
-modifies inside the workspace, and it is enforced twice over — the plugin gates
-both families, and the preset's `workspace-write` sandbox confines modifications
-to the workspace, so a write outside is refused even after its dialog is
-answered. The rows are ordered by how much they grant rather than nested sets:
-`workspace-access` reaches the workspace only, while `read-only` reaches every
-path for reading alone.
+modifies inside the workspace and the platform temp area (`/tmp`), and it is
+enforced twice over — the plugin gates both families, and the preset's
+`workspace-write` sandbox confines modifications to the same roots, so a write
+outside is refused even after its dialog is answered. `workspace-write` reads
+anywhere and modifies the workspace and the temp area; the picker row shares the
+`workspace-write` preset but is asked about outside writes. The rows are ordered
+by how much they grant rather than nested sets: `workspace-access` reaches the
+workspace and the temp area only, while `read-only` reaches every path for
+reading alone.
 
 The original three presets keep their original sandbox and approval values,
 including the environment-driven approval policy on `danger-full-access`.
@@ -37,11 +40,13 @@ seat, so the composer still shows exactly one permission control. Compared with
 the shipped control it adds:
 
 - one symbol per mode, drawn as inline SVG in the host's icon language
-  (read-only, workspace-write, full access, plus a crossed circle for no access
-  and a house for workspace-only);
+  (read-only, workspace-write, full access, plus a crossed circle for no access,
+  a house for edit-inside-workspace and a guarded folder for
+  read-and-write-inside-workspace);
 - a per-mode accent colour — green for no access, the theme's brand ink for
-  edit-inside-workspace (near-white on the dark theme), the fluorescent yellow for
-  read-only, the paler yellow for workspace-write, and red for full access — with the geometry and type kept
+  read-and-write-inside-workspace (near-white on the dark theme), the fluorescent
+  yellow for read-only, the paler yellow for edit-inside-workspace, and red for
+  full access — with the geometry and type kept
   identical across modes (the shipped control's own 13px/28px metrics) so
   switching levels never reflows the composer row. The theme ships no yellow
   alias, so the two yellows are the plugin's own tokens, published for both
@@ -62,8 +67,8 @@ the shipped control it adds:
 
 ## The authorization dialog
 
-When the level is `workspace` and a call reaches outside the workspace, the tool
-call pauses and the question panel opens with three choices:
+When the level is `workspace` and a call reaches outside the workspace and the
+temp area, the tool call pauses and the question panel opens with three choices:
 
 - **不允许** — refuse this call; the model receives the refusal reason.
 - **仅一次** — allow this call only; the next outside call asks again.

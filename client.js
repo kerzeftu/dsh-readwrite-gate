@@ -41,13 +41,15 @@ window.__ModuleLoader__.load({
         note: '不可查看、不可修改任何文件',
       },
       'workspace-access': {
-        symbol: 'workspace',
+        // The symbol swap with workspace-write is deliberate: this rung is the
+        // stricter "read and write inside" one, so it wears the guarded glyph.
+        symbol: 'workspaceWrite',
         tone: 'workspace',
         // The neutral end of the set: everything it grants stays inside the
-        // workspace, so it wears the theme's own brand ink (near-white on dark,
-        // near-black on light).
+        // workspace and the temp area, so it wears the theme's own brand ink
+        // (near-white on dark, near-black on light).
         accent: 'var(--dsw-alias-brand-primary)',
-        note: '工作区内可查看可修改；区外读取需授权',
+        note: '工作区与 /tmp 内可查看可修改；其他区外读取需授权',
       },
       'read-only': {
         symbol: 'readOnly',
@@ -57,11 +59,13 @@ window.__ModuleLoader__.load({
         note: '任意路径可查看；禁止修改',
       },
       'workspace-write': {
-        symbol: 'workspaceWrite',
+        // The house glyph, swapped with workspace-access: this rung is the
+        // everyday "work inside the workspace" one.
+        symbol: 'workspace',
         tone: 'other',
         // The paler yellow of the pair, with a hex fallback for a missing style.
         accent: 'var(--ap-level-write, #f5e3a3)',
-        note: '任意路径可查看；修改限工作区内',
+        note: '任意路径可查看；修改限工作区与 /tmp 内',
       },
       'danger-full-access': {
         symbol: 'full',
@@ -101,9 +105,32 @@ window.__ModuleLoader__.load({
       dark: { read: '#eeff00', write: '#f5e3a3' },
     }
     const PALETTE_STYLE_ID = 'dsh-access-permission-level-palette'
+    // Hover and focus fills cannot be expressed with inline styles, and the
+    // shipped surfaces get theirs from the primitive stylesheets, so the few
+    // rules this plugin's own rows and buttons need ride in the same element.
+    const SURFACE_CSS =
+      '.ap-level-row:hover:not(:disabled),.ap-level-row:focus-visible:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);outline:none}' +
+      '.ap-level-row:disabled{opacity:.4;cursor:not-allowed}' +
+      '.ap-dialog-close:hover:not(:disabled),.ap-dialog-cancel:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}' +
+      '.ap-dialog-go:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}'
     const PALETTE_CSS =
       `body{--ap-level-read:${LEVEL_PALETTE.light.read};--ap-level-write:${LEVEL_PALETTE.light.write}}` +
-      `body[data-ds-dark-theme]{--ap-level-read:${LEVEL_PALETTE.dark.read};--ap-level-write:${LEVEL_PALETTE.dark.write}}`
+      `body[data-ds-dark-theme]{--ap-level-read:${LEVEL_PALETTE.dark.read};--ap-level-write:${LEVEL_PALETTE.dark.write}}` +
+      SURFACE_CSS
+
+    // The shipped menu material (`Menu.module.css` + `MenuSurface.module.css`):
+    // a translucent fill over a blurred backdrop, the prominent elevation and the
+    // large card radius. Reading these tokens instead of a flat `bg-overlay` is
+    // what keeps the plugin's popups from looking like a grey box beside the
+    // host's own menus.
+    const MENU_SURFACE = {
+      border: 0,
+      borderRadius: 'var(--dsw-radius-lg, 12px)',
+      background: 'var(--dsw-menu-surface-fill, var(--dsw-alias-bg-layer-2))',
+      backdropFilter: 'var(--dsw-menu-backdrop-filter, none)',
+      boxShadow: 'var(--dsw-elevation-prominent, var(--dsw-shadow-lv3, 0 3px 8px rgba(0, 0, 0, 0.12)))',
+      '--dsw-elevation-stroke-color': 'var(--dsw-alias-border-l1)',
+    }
 
     /**
      * Publish the level palette into the page once. Kept out of React so the
@@ -141,9 +168,9 @@ window.__ModuleLoader__.load({
      */
     const FALLBACK_OPTIONS = [
       { value: 'no-access', name: '无权限', description: '不可查看、不可修改任何文件。' },
-      { value: 'workspace-access', name: '工作区内编辑', description: '可查看和修改工作区内的文件；区外读取会弹出授权页，区外修改仍会被拒绝。' },
+      { value: 'workspace-access', name: '工作区内读写', description: '可查看和修改工作区与 /tmp 内的文件；其他区外读取会弹出授权页，其他区外修改仍会被拒绝。' },
       { value: 'read-only', name: '只读', description: '可查看任意路径的文件；任何修改都会被拒绝。' },
-      { value: 'workspace-write', name: '工作区可写', description: '可查看任意路径的文件；修改限制在工作区内。' },
+      { value: 'workspace-write', name: '工作区内编辑', description: '可查看任意路径的文件；修改限制在工作区与 /tmp 内。' },
       { value: 'danger-full-access', name: '完全访问', description: '可查看和修改任意路径的文件。' },
     ]
 
@@ -179,6 +206,17 @@ window.__ModuleLoader__.load({
       chevron: [
         ['path', { d: 'M4.2 6.4 8 10.2l3.8-3.8', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }],
       ],
+      close: [
+        ['path', { d: 'M4.6 4.6 11.4 11.4', strokeWidth: 1.5, strokeLinecap: 'round' }],
+        ['path', { d: 'M11.4 4.6 4.6 11.4', strokeWidth: 1.5, strokeLinecap: 'round' }],
+      ],
+      // The dialog's risk mark, drawn in the error colour like the shipped
+      // RiskConfirmation's warning icon.
+      warning: [
+        ['path', { d: 'M8 2.6 14.2 13.4H1.8L8 2.6Z', strokeWidth: 1.4, strokeLinejoin: 'round' }],
+        ['path', { d: 'M8 6.6v3.2', strokeWidth: 1.4, strokeLinecap: 'round' }],
+        ['circle', { cx: 8, cy: 11.6, r: 0.75, fill: 'currentColor', stroke: 'none' }],
+      ],
     }
 
     const zh = {
@@ -186,8 +224,8 @@ window.__ModuleLoader__.load({
       glyph: '权限图标',
       'full.label': '完全访问',
       'full.description': '可读取和修改任意路径的文件。',
-      'workspace.label': '工作区内编辑',
-      'workspace.description': '可查看和修改工作区内的文件；区外读取会弹出授权页，区外修改仍会被拒绝。',
+      'workspace.label': '工作区内读写',
+      'workspace.description': '可查看和修改工作区与 /tmp 内的文件；其他区外读取会弹出授权页，其他区外修改仍会被拒绝。',
       'none.label': '无权限',
       'none.description': '不可查看、不可修改任何文件。',
       title: '本对话的访问权限',
@@ -198,6 +236,7 @@ window.__ModuleLoader__.load({
       confirmDescription: '完全访问下模型可以读取和修改任意路径的文件，不再逐一询问。',
       confirmAcknowledge: '我了解风险，并自行承担后果',
       confirmEnable: '切换',
+      close: '关闭',
       cancel: '取消',
       // The extra-readable-files feature. Every key below is read by a component
       // in this file; a key that is absent renders as its own literal name,
@@ -237,8 +276,8 @@ window.__ModuleLoader__.load({
       glyph: 'Access icon',
       'full.label': 'Full access',
       'full.description': 'View and modify files anywhere.',
-      'workspace.label': 'Edit inside workspace',
-      'workspace.description': 'View and modify files inside the workspace; outside reads ask for authorization and outside modifications are still refused.',
+      'workspace.label': 'Read and write inside workspace',
+      'workspace.description': 'View and modify files inside the workspace and /tmp; other outside reads ask for authorization and other outside modifications are still refused.',
       'none.label': 'No access',
       'none.description': 'Files can be neither viewed nor modified.',
       title: 'Access level of this conversation',
@@ -249,6 +288,7 @@ window.__ModuleLoader__.load({
       confirmDescription: 'Under full access the model reads and modifies files anywhere without asking each time.',
       confirmAcknowledge: 'I understand the risk and accept it',
       confirmEnable: 'Switch',
+      close: 'Close',
       cancel: 'Cancel',
       // Mirrors the Chinese dictionary key for key; see the note there.
       allowEntry: 'Extra readable and writable files',
@@ -786,10 +826,7 @@ window.__ModuleLoader__.load({
           maxHeight: '60vh',
           overflowY: 'auto',
           padding: 10,
-          border: '1px solid var(--dsw-alias-border-l1)',
-          borderRadius: 'var(--dsw-radius-lg, 12px)',
-          background: 'var(--dsw-alias-bg-overlay)',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+          ...MENU_SURFACE,
           zIndex: 1100,
           color: 'var(--dsw-alias-label-primary)',
         } }, [
@@ -831,10 +868,7 @@ window.__ModuleLoader__.load({
           maxHeight: '62vh',
           overflowY: 'auto',
           padding: 10,
-          border: '1px solid var(--dsw-alias-border-l1)',
-          borderRadius: 'var(--dsw-radius-lg, 12px)',
-          background: 'var(--dsw-alias-bg-overlay)',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+          ...MENU_SURFACE,
           zIndex: 1150,
           color: 'var(--dsw-alias-label-primary)',
         } }, [
@@ -1216,10 +1250,7 @@ window.__ModuleLoader__.load({
           minWidth: 280,
           maxWidth: 360,
           padding: 4,
-          border: '1px solid var(--dsw-alias-border-l1)',
-          borderRadius: 'var(--dsw-radius-lg, 12px)',
-          background: 'var(--dsw-alias-bg-overlay)',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+          ...MENU_SURFACE,
           zIndex: 1100,
         } }, options.map((option) => {
             const itemMode = MODES[option.value] ?? mode
@@ -1234,6 +1265,7 @@ window.__ModuleLoader__.load({
               key: option.value,
               type: 'button',
               role: 'menuitemradio',
+              className: 'ap-level-row',
               'aria-checked': active,
               disabled: busy,
               onClick: () => choose(option.value),
@@ -1242,12 +1274,16 @@ window.__ModuleLoader__.load({
                 alignItems: 'center',
                 gap: 6,
                 width: '100%',
+                minHeight: 34,
                 textAlign: 'left',
-                padding: '5px 7px',
+                padding: '6px 8px',
                 border: 'none',
                 borderRadius: 'var(--dsw-radius-md)',
                 cursor: 'pointer',
-                background: active ? 'var(--dsw-alias-bg-layer-2)' : 'transparent',
+                // The selected row keeps the host's hover wash instead of an
+                // opaque card fill, which would read as a white block on the
+                // translucent menu surface.
+                background: active ? 'var(--dsw-alias-interactive-bg-hover)' : 'transparent',
                 color: 'var(--dsw-alias-label-primary)',
               },
             }, [
@@ -1283,62 +1319,148 @@ window.__ModuleLoader__.load({
           ])]))
         : null
 
+      const closeConfirmation = () => {
+        setAcknowledged(false)
+        setConfirming(null)
+      }
+
+      // The shipped `RiskConfirmation` over `Modal` (Modal.module.css +
+      // RiskConfirmation.module.css): a full-viewport layer that centres a card
+      // on `bg-layer-2` with the prominent elevation, the theme's dialog wash
+      // painted by the mask over a blurred backdrop, a 22/14/12/24 header, a
+      // 24px content column holding the warning row and the acknowledgement, and
+      // an outline cancel beside a primary confirm in the footer.
       const confirmationPanel = confirming === null
         ? null
         : h('div', {
           key: 'confirm-layer',
-          // The backdrop dismisses the dialog on an outside press instead of
-          // swallowing the click: a dead overlay is what makes a page look frozen.
-          onPointerDown: (event) => {
-            if (event.target !== event.currentTarget) return
-            setAcknowledged(false)
-            setConfirming(null)
+          role: 'presentation',
+          style: {
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 'max(24px, var(--dsh-frame-overlay-top, 24px)) 24px',
           },
-          style: { position: 'fixed', inset: 0, zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0, 0, 0, 0.35)' },
         }, [
+          h('div', {
+            key: 'mask',
+            'aria-hidden': true,
+            // The mask dismisses on a press; the card sits above it, so a press
+            // inside the dialog never reaches this handler.
+            onPointerDown: closeConfirmation,
+            style: {
+              position: 'absolute',
+              inset: 'var(--dsh-frame-chrome-top, 0px) 0 0',
+              background: 'var(--dsw-alias-bg-mask-1, rgba(0, 0, 0, 0.24))',
+              backdropFilter: 'var(--dsw-mask-blur, none)',
+            },
+          }),
           h('div', {
             key: 'card',
             role: 'dialog',
             'aria-modal': true,
             'aria-label': props.t('confirmTitle'),
             style: {
-              width: 'min(420px, calc(100vw - 32px))',
-              padding: 16,
-              border: '1px solid var(--dsw-alias-border-l2)',
-              borderRadius: 'var(--dsw-radius-xl, 16px)',
-              background: 'var(--dsw-alias-bg-overlay)',
-              boxShadow: '0 12px 32px rgba(0, 0, 0, 0.24)',
+              boxSizing: 'border-box',
+              position: 'relative',
+              zIndex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 20,
+              width: 'min(440px, 100%)',
+              maxHeight: '100%',
+              padding: '0 0 24px',
+              overflow: 'hidden',
+              border: 0,
+              borderRadius: 'var(--dsw-radius-panel, 16px)',
+              background: 'var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-base))',
+              boxShadow: 'var(--dsw-elevation-prominent, 0 3px 8px rgba(0, 0, 0, 0.1))',
               color: 'var(--dsw-alias-label-primary)',
             },
           }, [
-            h('div', { key: 'title', style: { fontSize: 15, fontWeight: 500, lineHeight: '24px' } }, props.t('confirmTitle')),
-            h('div', { key: 'desc', style: { marginTop: 6, color: 'var(--dsw-alias-label-secondary)', fontSize: 13, lineHeight: '20px' } }, props.t('confirmDescription')),
-            h('label', { key: 'ack', style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, fontSize: 13 } }, [
-              h('input', {
-                key: 'box',
-                type: 'checkbox',
-                checked: acknowledged,
-                onChange: (event) => setAcknowledged(event.target.checked),
-              }),
-              props.t('confirmAcknowledge'),
+            h('div', {
+              key: 'content',
+              style: { display: 'flex', flexDirection: 'column', width: '100%', minHeight: 0, overflowY: 'auto' },
+            }, [
+              h('div', {
+                key: 'header',
+                style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '22px 14px 12px 24px' },
+              }, [
+                h('h2', {
+                  key: 'title',
+                  style: { margin: 0, fontSize: 16, lineHeight: '24px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' },
+                }, props.t('confirmTitle')),
+                h('button', {
+                  key: 'close',
+                  type: 'button',
+                  className: 'ap-dialog-close',
+                  'aria-label': props.t('close'),
+                  onClick: closeConfirmation,
+                  style: {
+                    flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 28, height: 28, padding: 0, border: 'none',
+                    borderRadius: 'var(--dsw-radius-sm, 8px)', background: 'transparent',
+                    cursor: 'pointer', color: 'var(--dsw-alias-label-secondary)',
+                  },
+                }, ModeSymbol('close')),
+              ]),
+              h('div', {
+                key: 'body',
+                style: { display: 'flex', flexDirection: 'column', minWidth: 0, marginTop: 20, padding: '0 24px' },
+              }, [
+                h('div', {
+                  key: 'warning',
+                  style: { display: 'flex', alignItems: 'flex-start', gap: 10, color: 'var(--dsw-alias-label-secondary)', fontSize: 14, lineHeight: '22px' },
+                }, [
+                  h('span', {
+                    key: 'icon',
+                    'aria-hidden': true,
+                    style: { flex: 'none', display: 'inline-flex', marginTop: 2, color: 'var(--dsw-alias-state-error-primary)' },
+                  }, ModeSymbol('warning', 18)),
+                  h('p', { key: 'text', style: { margin: 0 } }, props.t('confirmDescription')),
+                ]),
+                h('label', {
+                  key: 'ack',
+                  style: { display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 20, color: 'var(--dsw-alias-label-primary)', fontSize: 14, lineHeight: '22px', cursor: 'pointer' },
+                }, [
+                  h('input', {
+                    key: 'box',
+                    type: 'checkbox',
+                    checked: acknowledged,
+                    onChange: (event) => setAcknowledged(event.target.checked),
+                    style: {
+                      flex: 'none', width: 16, height: 16, margin: '3px 0 0',
+                      accentColor: 'var(--dsw-alias-button-primary-fill)', cursor: 'pointer',
+                    },
+                  }),
+                  h('span', { key: 'text' }, props.t('confirmAcknowledge')),
+                ]),
+              ]),
             ]),
-            h('div', { key: 'actions', style: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 } }, [
+            h('div', {
+              key: 'footer',
+              style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, padding: '0 24px' },
+            }, [
               h('button', {
                 key: 'cancel',
                 type: 'button',
-                onClick: () => {
-                  setAcknowledged(false)
-                  setConfirming(null)
-                },
+                className: 'ap-dialog-cancel',
+                onClick: closeConfirmation,
                 style: {
-                  height: 30, padding: '0 12px', borderRadius: 8, cursor: 'pointer',
-                  border: '1px solid var(--dsw-alias-border-l1)', background: 'transparent',
-                  color: 'var(--dsw-alias-label-primary)', fontSize: 13,
+                  boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  height: 36, minWidth: 72, padding: '0 14px',
+                  border: '0.5px solid var(--dsw-alias-border-l3)',
+                  borderRadius: 'var(--dsw-radius-md, 8px)', background: 'transparent',
+                  color: 'var(--dsw-alias-label-primary)', fontSize: 14, lineHeight: '22px', cursor: 'pointer',
                 },
               }, props.t('cancel')),
               h('button', {
                 key: 'confirm',
                 type: 'button',
+                className: 'ap-dialog-go',
                 disabled: !acknowledged,
                 onClick: () => {
                   const value = confirming
@@ -1347,12 +1469,14 @@ window.__ModuleLoader__.load({
                   submit(value)
                 },
                 style: {
-                  height: 30, padding: '0 12px', borderRadius: 8,
+                  boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  height: 36, minWidth: 136, padding: '0 14px', border: 'none',
+                  borderRadius: 'var(--dsw-radius-md, 8px)',
+                  background: 'var(--dsw-alias-button-primary-fill)',
+                  color: 'var(--dsw-alias-label-primary-foreground)',
+                  fontSize: 14, lineHeight: '22px',
                   cursor: acknowledged ? 'pointer' : 'not-allowed',
-                  opacity: acknowledged ? 1 : 0.5,
-                  border: '1px solid var(--dsw-alias-state-error-primary)',
-                  background: 'var(--dsw-alias-state-error-primary)',
-                  color: 'var(--dsw-alias-bg-base)', fontSize: 13,
+                  opacity: acknowledged ? 1 : 0.4,
                 },
               }, props.t('confirmEnable')),
             ]),

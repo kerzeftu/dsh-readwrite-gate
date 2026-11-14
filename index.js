@@ -16,7 +16,7 @@
  * @module @local/dsh-access-permission
  */
 import { readFileSync, statSync, realpathSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { allowListOf, allowedBy, classifyTool, containsPath, directoryOf, isLevel, normalizeUserPath, scopeBaseOf } from './functions.js'
 
 /** Services this plugin cannot work without. */
@@ -54,6 +54,45 @@ function windowsMounts() {
     mounts[drive[1].toUpperCase()] = fields[1]
   }
   return mounts
+}
+
+/**
+ * The platform temp area, which the plugin treats as inside the workspace.
+ *
+ * The shipped `workspace-write` sandbox already writes `/tmp` and `os.tmpdir()`
+ * (`dsh-sandbox`'s writable roots), and scratch files are ordinary tooling
+ * output, so asking about them would be a dialog the platform grants anyway.
+ * Canonicalised because `/tmp` may itself be a symlink on some systems.
+ * @returns the temp roots, de-duplicated, never empty on a normal machine.
+ */
+const TEMP_AREA = (() => {
+  const roots = []
+  for (const candidate of ['/tmp', tmpdir()]) {
+    if (typeof candidate !== 'string' || candidate === '') continue
+    let canonical = candidate
+    try { canonical = realpathSync(candidate) } catch { canonical = candidate }
+    for (const value of [candidate, canonical]) {
+      if (value !== '' && !roots.includes(value)) roots.push(value)
+    }
+  }
+  return roots
+})()
+
+/**
+ * Whether a path lives in the platform temp area.
+ * @param path - the absolute path to test.
+ * @returns `true` when a temp root contains it.
+ */
+function insideTempArea(path) {
+  if (typeof path !== 'string' || path === '') return false
+  for (const root of TEMP_AREA) {
+    try {
+      if (containsPath(path, root, root).contained) return true
+    } catch {
+      // A malformed candidate simply fails to match.
+    }
+  }
+  return false
 }
 
 /**
@@ -734,9 +773,10 @@ export function apply(ctx, config = {}) {
    */
   function familyState(session, root, scopeBase, kind, paths) {
     const unique = [...new Set(paths)]
-    const outside = root === undefined
-      ? unique.slice()
-      : unique.filter((path) => !containsPath(path, root, scopeBase).contained)
+    // The temp area counts as inside: the platform sandbox writes there in the
+    // same mode, so a dialog about it would only ask for what is already allowed.
+    const outside = unique.filter((path) => !insideTempArea(path)
+      && (root === undefined || !containsPath(path, root, scopeBase).contained))
     // The read allowlist admits named outsiders without a dialog. It is
     // read-only by construction: a modification still goes through the gate.
     const admittedBy = session === undefined || kind !== 'read'
@@ -1354,19 +1394,19 @@ export function apply(ctx, config = {}) {
       ? '可读取任意路径的文件。'
       : readScope === 'none'
         ? '任何文件都不能读取。'
-        : `只能查看工作区（${root}）内的文件；区外路径需要用户授权，授权按目录记录：该目录下的全部文件与子目录随后都放行。`
+        : `只能查看工作区（${root}）和临时目录（${TEMP_AREA.join('、')}）内的文件；此外的区外路径需要用户授权，授权按目录记录：该目录下的全部文件与子目录随后都放行。`
     const writeText = writeScope === 'anywhere'
       ? '可修改任意路径的文件。'
       : writeScope === 'none'
         ? '任何修改都会被拒绝。'
-        : '只能修改工作区内的文件；区外修改会先请求用户授权，但平台沙箱仍会拒绝工作区外的写入。'
+        : `只能修改工作区（${root}）和临时目录（${TEMP_AREA.join('、')}）内的文件；此外的区外修改会先请求用户授权，但平台沙箱仍会拒绝工作区外的写入。`
     const asks = readScope === 'workspace' || writeScope === 'workspace'
     return [
       `当前访问权限：${definition?.label ?? resolved.key}。${readText}${writeText}`,
       asks ? (granted.length === 0 ? '本对话尚未授予任何额外路径。' : `本对话已授予的额外路径：${briefList(granted)}。`) : '',
       asks ? '读取与修改分开授权：越界操作会暂停并向用户弹出授权页，用户可选择“不允许”“仅一次”或“该对话中总是允许这个目录”（记入额外路径列表，可随时撤销）。' : '',
       asks ? '写权限包含读权限：授权修改一个目录后，读取该目录里的文件不再单独询问。' : '',
-      asks ? '命令按真实路径判断：只要涉及的路径都在工作区内就不会弹授权页，管道、重定向、循环、变量赋值、就地修改和 heredoc 本身都不触发授权。' : '',
+      asks ? `命令按真实路径判断：只要涉及的路径都在工作区或临时目录（${TEMP_AREA.join('、')}）内就不会弹授权页，管道、重定向、循环、变量赋值、就地修改和 heredoc 本身都不触发授权。` : '',
       readScope === 'workspace' ? '命令行里读不出路径的脚本或未知程序，按它所在的工作目录判断：工作目录在工作区内就放行，在工作区外会先询问用户。' : '',
     ].join('')
   }
