@@ -25,14 +25,12 @@
     "functions.js",
     "client.js",
     "cordis.patch.yml",
-    "locale/en.json",
-    "locale/zh.json",
+    "locale",
     "icon.svg",
     "README.md",
-    "LICENSE",
+    "README.en.md",
     "CHANGELOG.md",
-    "docs",
-    "test"
+    "LICENSE"
   ],
   "dsh": {
     "bundle": {
