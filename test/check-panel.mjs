@@ -37,9 +37,24 @@ const instance = captured.factory((n) => {
   throw new Error('require ' + n)
 })
 const regs = []
+// Every read of the allowlist leaves through `commands.execute('/access-allow
+// list')`; counting there catches a read issued from any render's closure.
+let listReads = 0
+// The session status store is the client-visible edge of a question panel: it
+// publishes the pending interaction while the dialog is up and drops it when
+// the answer is in. The control watches it because the gate asks through the
+// user-questions service, which never writes a `tool/call` event.
+let statusSnapshot = new Map([['s1', { running: true, pendingInteraction: { key: 'p' }, completionUnread: false }]])
+const statusListeners = new Set()
+const statusStore = {
+  getSnapshot: () => statusSnapshot,
+  subscribe(listener) { statusListeners.add(listener); return () => { statusListeners.delete(listener) } },
+}
+const notifyStatus = () => { for (const listener of [...statusListeners]) listener() }
 instance.apply({
   effect(fn) { const d = fn(); return d ?? (() => {}) },
   locale: { register: () => () => {}, bind: () => (k) => zh[k] ?? k }, on() {},
+  uiSession: { sessionStatus: statusStore },
   slots: { inject(k, cb) { regs.push({ key: k, ...cb() }); return () => {} }, register: (o, c) => ({ options: o, component: c }) },
   commandUi: { register() { return () => {} } }, sessions: { binding: () => undefined },
   remote: { $on: () => () => {}, permissionPresets: { catalog: async () => ({ ok: true, value: { options: [] } }) },
@@ -68,7 +83,12 @@ instance.apply({
         } }
       },
     },
-    commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: '额外可读写文件（可读 2 项、可写 1 项） [allow: %2Ftmp%2Fa|rw\u0001%2Ftmp%2Fb|r\u0001%2Ftmp%2Fc|wd]' } } }) } },
+    commands: {
+      execute: async (sid, line) => {
+        if (typeof line === 'string' && line.startsWith('/access-allow list')) listReads += 1
+        return { ok: true, value: { result: { kind: 'success', text: '额外可读写文件（可读 2 项、可写 1 项） [allow: %2Ftmp%2Fa|rw\u0001%2Ftmp%2Fb|r\u0001%2Ftmp%2Fc|wd]' } } }
+      },
+    } },
 })
 const seat = regs.find((r) => r.key === 'conversation.input.right')
 const injected = seat.options.inject('s1')
@@ -234,5 +254,29 @@ check('the browser shows the child folder', browseTexts.includes('workspace'), J
 check('the browser offers the actions', browseTexts.includes(zh.browseChoose) && browseTexts.includes(zh.browseUp) && browseTexts.includes(zh.browseCrumbHome))
 check('the browser explains the fallback', browseTexts.some((s) => s.includes(zh.pickFallback)))
 check('the panel title names both families', shown.some((s) => s.includes('额外可读写文件')), JSON.stringify(shown))
+// ---- the count follows the answered dialog, not the click ----
+// The host records the grant while the shipped question panel is up; the panel
+// is a pending interaction on the session status store, so its disappearance is
+// the edge the control has to read on. A status change that leaves the dialog
+// where it was must not read: most status notifications mean nothing here.
+slots[0] = false
+const statusProps = { ...props, statusStore }
+cursor = 0
+effects.length = 0
+seat.component(statusProps)
+for (const fn of effects.splice(0)) fn()
+for (let tick = 0; tick < 2; tick += 1) await new Promise((r) => setTimeout(r, 0))
+listReads = 0
+statusSnapshot = new Map([['s1', { running: true, pendingInteraction: { key: 'p' }, completionUnread: true }]])
+notifyStatus()
+for (let tick = 0; tick < 2; tick += 1) await new Promise((r) => setTimeout(r, 0))
+check('an unrelated status change does not read the list', listReads === 0, JSON.stringify({ listReads }))
+listReads = 0
+// The answer lands: the panel is gone and the turn is winding down.
+statusSnapshot = new Map([['s1', { running: false, pendingInteraction: undefined, completionUnread: false }]])
+notifyStatus()
+for (let tick = 0; tick < 2; tick += 1) await new Promise((r) => setTimeout(r, 0))
+check('an answered dialog makes the control re-read the list', listReads >= 1, JSON.stringify({ listReads }))
+
 say(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`)
 process.exit(failures ? 1 : 0)

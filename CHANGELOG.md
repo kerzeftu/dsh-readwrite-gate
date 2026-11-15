@@ -2,6 +2,23 @@
 
 公开仓库：<https://github.com/kerzeftu/dsh-readwrite-gate>（MIT）。
 
+## 1.3.1 — 2026-11-15
+
+### Fixed
+- 授予目录后「额外可读写文件」的计数不再等到点开面板才更新。此前的刷新只依赖 `userQuestions`
+  投影，而该投影从 `tool/call` 与 `tool/result` 折叠——插件的授权页走的是问答服务直调，
+  不产生这两个事件，计数因此停在旧值。现在改为订阅会话状态：授权页是 pending interaction，
+  应答后该标记消失即重读列表，回合由运行转结束时也重读；读取有节流，其余状态变化不触发。
+  不新增定时器，空闲时没有请求，也不会往会话日志写事件。
+
+### Changed
+- 客户端注入增加 `uiSession`（只读取 `sessionStatus`），`conversation.input.right` 的注入项增加
+  `statusStore`。
+
+### Docs
+- `docs/build-refresh-and-portability.md` 增加实施记录：为什么否决周期读取（命令执行会写
+  `command/run`/`command/done`）与为什么不能自建推送事件，以及阶段一最终采用的边沿触发方案。
+
 ## 1.3.0 — 2026-11-15
 
 ### Added

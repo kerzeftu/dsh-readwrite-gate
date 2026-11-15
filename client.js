@@ -550,6 +550,43 @@ window.__ModuleLoader__.load({
         return () => { alive = false }
       }, [restricted, currentValue, settledQuestions])
 
+      // The `userQuestions` projection above cannot see a grant the gate
+      // records: the gate asks through the service, so no `tool/call` and
+      // `tool/result` pair ever reaches the log, and `settled` stays put. What
+      // the browser does see is the question panel itself, because it is a
+      // pending interaction: it appears on status and disappears once answered.
+      // Re-read on that edge, and when a turn stops running (a grant can also
+      // land while the turn is winding down). Status notifications are frequent
+      // and most of them say nothing about the list, so the read is throttled.
+      const enabledRef = React.useRef(false)
+      enabledRef.current = currentValue !== undefined
+      const statusStore = props.statusStore
+      const previousStatusRef = React.useRef(undefined)
+      const lastAutoReadRef = React.useRef(0)
+      React.useEffect(() => {
+        if (statusStore === undefined || typeof statusStore.subscribe !== 'function') return undefined
+        const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
+        const readStatus = () => (sessionId === '' ? undefined : statusStore.getSnapshot().get(sessionId))
+        previousStatusRef.current = readStatus()
+        const changed = () => {
+          const before = previousStatusRef.current
+          const next = readStatus()
+          previousStatusRef.current = next
+          if (before === undefined) return
+          const answered = before.pendingInteraction !== undefined
+            && (next === undefined || next.pendingInteraction === undefined)
+          const settled = before.running === true && (next === undefined || next.running !== true)
+          if (!answered && !settled) return
+          if (enabledRef.current !== true) return
+          const now = Date.now()
+          if (now - lastAutoReadRef.current < 250) return
+          lastAutoReadRef.current = now
+          Promise.resolve(refresh()).catch(() => null)
+        }
+        const stop = statusStore.subscribe(changed)
+        return () => { if (typeof stop === 'function') stop() }
+      }, [statusStore, props.sessionId])
+
       React.useEffect(() => {
         if (!open && browse === null) return undefined
         const inside = (target) => (rootRef.current !== null && rootRef.current.contains(target))
@@ -1640,6 +1677,11 @@ window.__ModuleLoader__.load({
       inject: [
         'slots',
         'sessions',
+        // The session status store carries the pending interaction a question
+        // panel publishes; it is the only client-visible edge a granted dialog
+        // produces, because the gate asks through the service rather than a
+        // tool call.
+        'uiSession',
         'locale',
         'remote',
         'remote.commands',
@@ -1698,6 +1740,12 @@ window.__ModuleLoader__.load({
             // The control hands the session back to the add menu's watcher, so a
             // menu click only ever reaches the browser mounted for its session.
             sessionId,
+            // Session status is where a question panel becomes visible and then
+            // disappears; the control watches it to notice that a dialog the
+            // gate opened has been answered. Read lazily: the service may be
+            // absent in a headless session, and the control then simply never
+            // gets the notification.
+            statusStore: ctx.uiSession?.sessionStatus,
             listAllowed: async () => {
               const listed = await listAllowed(sessionId)
               return { entries: listed.entries, failure: listed.failure }
