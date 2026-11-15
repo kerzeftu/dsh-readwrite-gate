@@ -17,7 +17,7 @@
  */
 import { readFileSync, statSync, realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { allowListOf, allowedBy, classifyTool, containsPath, directoryOf, isLevel, normalizeUserPath, scopeBaseOf } from './functions.js'
+import { allowListOf, allowedBy, classifyPathForm, classifyTool, containsPath, directoryOf, foldPath, isLevel, normalizeUserPath, scopeBaseOf } from './functions.js'
 
 /** Services this plugin cannot work without. */
 export const inject = [
@@ -65,9 +65,14 @@ function windowsMounts() {
  * Canonicalised because `/tmp` may itself be a symlink on some systems.
  * @returns the temp roots, de-duplicated, never empty on a normal machine.
  */
+const WINDOWS_HOST = process.platform === 'win32'
+
 const TEMP_AREA = (() => {
   const roots = []
-  for (const candidate of ['/tmp', tmpdir()]) {
+  // `/tmp` is a POSIX root. On a native Windows host the literal word names
+  // nothing, and accepting it would widen the platform's own temp allowance.
+  const candidates = WINDOWS_HOST ? [tmpdir()] : ['/tmp', tmpdir()]
+  for (const candidate of candidates) {
     if (typeof candidate !== 'string' || candidate === '') continue
     let canonical = candidate
     try { canonical = realpathSync(candidate) } catch { canonical = candidate }
@@ -89,7 +94,11 @@ const TEMP_AREA = (() => {
  */
 function insideTempArea(path) {
   if (typeof path !== 'string' || path === '') return false
-  if (!(path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\'))) return false
+  // Only a path that carries its own anchor can be inside: a relative word has
+  // no home yet, and reading it against the temp root made `./secret.txt` in an
+  // outside working directory look like `/tmp/secret.txt`.
+  const form = classifyPathForm(path)
+  if (form !== 'root' && form !== 'drive' && form !== 'unc') return false
   for (const root of TEMP_AREA) {
     try {
       if (containsPath(path, root, root).contained) return true
@@ -111,12 +120,21 @@ function absolutePathOf(path, base) {
   // `~` is the shell's business; without expansion it names nothing this gate
   // can place, so it stays treated as outside.
   if (path.startsWith('~')) return undefined
-  if (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')) return path
-  if (typeof base !== 'string' || base === '') return undefined
-  return `${base.replace(/[\\/]+$/, '')}/${path}`
+  const windows = WINDOWS_HOST
+    || classifyPathForm(path) === 'drive'
+    || classifyPathForm(path) === 'unc'
+    || /^[A-Za-z]:[\\/]/.test(typeof base === 'string' ? base : '')
+    || (typeof base === 'string' && base.includes('\\'))
+  const folded = foldPath(path, { windows, base: typeof base === 'string' ? base : undefined })
+  // A device namespace or a drive-relative word names no placeable path; the
+  // caller treats `undefined` as outside.
+  return folded
 }
 
-/** Real paths seen so far, so one tool call's symlink resolution is not repeated. */
+/** How long one realpath answer is reused, so a moved symlink is noticed. */
+const CANONICAL_TTL_MS = 2000
+
+/** Real paths seen recently, so one tool call's symlink resolution is not repeated. */
 const canonicalCache = new Map()
 
 /**
@@ -130,21 +148,24 @@ const canonicalCache = new Map()
  */
 function canonicalPathOf(path) {
   if (typeof path !== 'string' || path === '') return path
+  const now = Date.now()
   const cached = canonicalCache.get(path)
-  if (cached !== undefined) return cached
+  if (cached !== undefined && now - cached.at < CANONICAL_TTL_MS) return cached.value
   if (canonicalCache.size > 4096) canonicalCache.clear()
   let result = path
   try {
     result = realpathSync(path)
   } catch {
-    const boundary = path.lastIndexOf('/')
+    // The longest existing ancestor is resolved instead: split on either
+    // separator, because a native Windows path is written with backslashes.
+    const boundary = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
     if (boundary > 0) {
       const head = path.slice(0, boundary)
       const real = canonicalPathOf(head)
       if (real !== head) result = `${real}${path.slice(boundary)}`
     }
   }
-  canonicalCache.set(path, result)
+  canonicalCache.set(path, { value: result, at: now })
   return result
 }
 

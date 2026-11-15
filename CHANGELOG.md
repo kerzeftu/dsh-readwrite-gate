@@ -2,6 +2,26 @@
 
 公开仓库：<https://github.com/kerzeftu/dsh-readwrite-gate>（MIT）。
 
+## 1.4.0 — 2026-11-15
+
+### Changed
+- 路径判定改为“先归形态、再折叠”的单一模型（`classifyPathForm` / `foldPath`）。共享根以
+  `server\share` 为锚，`..` 不能退到共享之外；盘符路径最多退到盘根；带锚点的相对 Windows 路径
+  借基准路径的盘符或共享根补齐。
+- `file:` URL 只有一个解码入口（`fileUrlPath`）：支持 `file:///C:/…`、`file://server/share/…`、
+  `localhost` 与百分号转义。手动输入路径复用同一入口，面板与闸门不再可能给出两种路径。
+
+### Fixed
+- POSIX 上反斜杠不再被当分隔符：`/etc\passwd` 不会被读成 `/etc/passwd`，`/home/user/a\b` 仍是一层目录。
+- 设备路径（`\\?\C:\x`、`\\.\PhysicalDrive0`）与盘符相对路径（`C:work`）不再被当成普通相对路径，
+  统一拒绝并给出原因（`device-path` / `drive-relative`）。
+- 临时区在原生 Windows 上只认 `os.tmpdir()`，不再因为字面量 `/tmp` 而放行一个不存在的位置。
+- `canonicalPathOf` 的父目录回退同时认 `/` 与 `\`；缓存加 2 秒过期，链接改指后不会一直用旧答案。
+
+### Added
+- `test/check-paths.mjs`：跨平台的纯词法路径用例（形态、文件 URL、折叠、包含、拒绝原因、POSIX 反斜杠），
+  已加入 `npm test`。
+
 ## 1.3.1 — 2026-11-15
 
 ### Fixed

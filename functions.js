@@ -256,14 +256,130 @@ export function isUrlLike(word) {
  * @param word - one shell word or tool argument.
  * @returns the decoded absolute path, or `undefined` for every other scheme.
  */
+/** The path forms a word can take, independent of the host it is read on. */
+export function classifyPathForm(value) {
+  if (typeof value !== 'string' || value === '') return 'relative'
+  // `\\?\C:\x` and `\\.\Device` name a device namespace, not a file tree.
+  if (/^[\\/]{2}[?.](?:[\\/]|$)/.test(value)) return 'device'
+  // `\\server\share` and `//server/share` are a share root, not a rooted path.
+  if (/^[\\/]{2}[^\\/]/.test(value)) return 'unc'
+  if (/^[A-Za-z]:[\\/]/.test(value)) return 'drive'
+  // `C:foo` is relative to that drive's current directory, which nothing here can know.
+  if (/^[A-Za-z]:/.test(value)) return 'drive-relative'
+  if (/^[\\/]/.test(value)) return 'root'
+  return 'relative'
+}
+
+/**
+ * The local path behind a `file:` URL.
+ *
+ * A file URL names a file on the *host* that serves the session, not in the
+ * browser: `file:///C:/x` is a drive path, `file://server/share/x` is a share,
+ * and `file:///x` is a rooted POSIX path. Percent escapes are decoded; the
+ * result always uses `/` as its separator and keeps the form recognisable, so
+ * one call site does not read `file:///C:/x` as `/C:/x` while another reads it
+ * as `C:/x`.
+ * @param word - the word to inspect.
+ * @returns the path, or `undefined` when the word is not a file URL.
+ */
 export function fileUrlPath(word) {
   if (typeof word !== 'string') return undefined
-  const match = /^file:\/\/(?:localhost)?(.*)$/i.exec(word)
+  const match = /^file:\/\/([^\\/]*)([\s\S]*)$/i.exec(word)
   if (match === null) return undefined
-  let raw = match[1]
-  try { raw = decodeURIComponent(raw) } catch { /* keep the literal text */ }
-  if (raw === '') return '/'
-  return raw.startsWith('/') ? raw : `/${raw}`
+  const host = match[1]
+  let tail = match[2]
+  try {
+    tail = decodeURIComponent(tail)
+  } catch {
+    // A malformed escape keeps its literal text rather than dropping the path.
+  }
+  if (host !== '' && host.toLowerCase() !== 'localhost') {
+    const rest = tail.replace(/^[\\/]+/, '')
+    return rest === '' ? `//${host}` : `//${host}/${rest}`
+  }
+  if (tail === '' || /^[\\/]+$/.test(tail)) return '/'
+  // `file:///C:/x` arrives with a leading slash the drive path does not have.
+  const drive = /^[\\/]*([A-Za-z]:)([\\/][\s\S]*)?$/.exec(tail)
+  if (drive !== null) return `${drive[1].toUpperCase()}${(drive[2] ?? '/').replace(/\\/g, '/')}`
+  const rest = tail.replace(/\\/g, '/')
+  return rest.startsWith('/') ? rest : `/${rest}`
+}
+
+/**
+ * Fold `.` and `..` in a path without touching the filesystem.
+ *
+ * On Windows the fold keeps the anchor a path cannot climb out of: a drive
+ * letter for `C:\x`, the two share segments for `\\server\share`. A `..`
+ * that would leave the anchor stops there instead of turning into an escape.
+ * On POSIX a backslash is an ordinary filename character, so it never splits.
+ * @param value - the path to fold.
+ * @param options - `windows` picks the separator rules; `base` resolves relative words.
+ * @returns the folded path, or `undefined` for a form that cannot be placed.
+ */
+export function foldPath(value, options = {}) {
+  if (typeof value !== 'string' || value === '') return undefined
+  const windows = options.windows === true
+  const form = classifyPathForm(value)
+  if (form === 'device') return undefined
+  if (windows) {
+    if (form === 'drive-relative') return undefined
+    const base = typeof options.base === 'string' && options.base !== '' ? options.base : ''
+    let text = value
+    if (form === 'relative') {
+      const baseFolded = foldPath(base, { windows: true })
+      if (baseFolded === undefined) return undefined
+      text = `${baseFolded}\\${value}`
+    } else if (form === 'root') {
+      // A rooted path without a drive belongs to the drive the base sits on.
+      const drive = /^([A-Za-z]):/.exec(base)
+      const share = /^[\\/]{2}([^\\/]+)[\\/]([^\\/]+)/.exec(base)
+      if (drive !== null) text = `${drive[1].toUpperCase()}:${value}`
+      else if (share !== null) text = `\\\\${share[1]}\\${share[2]}${value}`
+      else return undefined
+    }
+    const unc = /^[\\/]{2}([^\\/]+)[\\/]([^\\/]+)([\s\S]*)$/.exec(text)
+    let anchor
+    let body
+    if (unc !== null) {
+      anchor = `\\\\${unc[1]}\\${unc[2]}`
+      body = unc[3]
+    } else {
+      const drive = /^([A-Za-z]):([\s\S]*)$/.exec(text)
+      if (drive === null) return undefined
+      anchor = `${drive[1].toUpperCase()}:`
+      body = drive[2]
+    }
+    const out = []
+    for (const part of body.split(/[\\/]+/)) {
+      if (part === '' || part === '.') continue
+      if (part === '..') {
+        if (out.length > 0) out.pop()
+        continue
+      }
+      out.push(part)
+    }
+    return out.length === 0 ? `${anchor}\\` : `${anchor}\\${out.join('\\')}`
+  }
+  const base = typeof options.base === 'string' && options.base !== '' ? options.base : ''
+  let text = value
+  if (form === 'relative') {
+    const baseFolded = foldPath(base)
+    if (baseFolded === undefined) return undefined
+    text = `${baseFolded}/${value}`
+  }
+  const rooted = /^[\\/]/.test(text)
+  const out = []
+  for (const part of text.split('/')) {
+    if (part === '' || part === '.') continue
+    if (part === '..') {
+      if (out.length > 0) out.pop()
+      continue
+    }
+    out.push(part)
+  }
+  const body = out.join('/')
+  if (rooted) return body === '' ? '/' : `/${body}`
+  return body
 }
 
 export function looksLikePath(word) {
@@ -1206,43 +1322,43 @@ function writePathsOfUnknownTool(mutating) {
  * @param base - directory relative paths resolve against, normally the root.
  * @returns containment verdict; an unknown root never contains anything.
  */
-export function containsPath(path, root, base) {
+export function containsPath(path, root, base, options = {}) {
   if (typeof root !== 'string' || root === '') {
     return { contained: false, reason: 'no-workspace-root', resolved: path }
   }
   if (typeof path !== 'string' || path.startsWith('~')) {
     return { contained: false, reason: 'unresolvable-path', resolved: path }
   }
-  const windows = /^[A-Za-z]:[\\/]/.test(root) || root.startsWith('\\\\')
-  // A backslash separates only on Windows: on POSIX it is an ordinary filename
-  // character, and splitting on it made `/etc\passwd` look like `/etc/passwd`.
-  const separator = windows ? /[\\/]+/ : /\//
-  const isAbsolute = (value) => value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
-  const fold = (value) => {
-    const parts = value.split(separator)
-    const head = windows ? (parts[0] ?? '') : ''
-    const rest = windows ? parts.slice(1) : parts
-    const out = []
-    for (const part of rest) {
-      if (part === '' || part === '.') continue
-      if (part === '..') { out.pop(); continue }
-      out.push(part)
-    }
-    const joined = out.join(windows ? '\\' : '/')
-    if (windows) return `${head}\\${joined}`
-    const prefix = value.startsWith('/') ? '/' : ''
-    return `${prefix}${joined}`
+  const form = classifyPathForm(path)
+  // A device namespace and a drive-relative word name no path this gate can
+  // place, so they are refused rather than resolved against a guess.
+  if (form === 'device') return { contained: false, reason: 'device-path', resolved: path }
+  const windows = options.windows === true
+    || process.platform === 'win32'
+    || /^[A-Za-z]:[\\/]/.test(root)
+    || /^[\\/]{2}/.test(root)
+    || root.includes('\\')
+  if (windows && form === 'drive-relative') {
+    return { contained: false, reason: 'drive-relative', resolved: path }
   }
-  const resolve = (value) => fold(value).replace(windows ? /[\\/]+$/ : /\/+$/, '')
+  const foldedRoot = foldPath(root, { windows })
+  if (foldedRoot === undefined) {
+    return { contained: false, reason: 'unresolvable-root', resolved: path }
+  }
+  const foldedBase = foldPath(typeof base === 'string' && base !== '' ? base : root, { windows })
+  if (foldedBase === undefined) {
+    return { contained: false, reason: 'unresolvable-path', resolved: path }
+  }
+  const folded = foldPath(path, { windows, base: foldedBase })
+  if (folded === undefined) {
+    return { contained: false, reason: windows ? 'unresolvable-path' : 'unresolvable-path', resolved: path }
+  }
   const compare = (value) => (windows ? value.toLowerCase() : value)
-  const rootResolved = compare(resolve(root))
-  const baseResolved = compare(resolve(typeof base === 'string' && base !== '' ? base : root))
-  const resolved = compare(isAbsolute(path) ? resolve(path) : resolve(`${baseResolved}/${path}`))
+  const rootResolved = compare(foldedRoot)
+  const resolved = compare(folded)
   if (resolved === rootResolved) return { contained: true, resolved }
-  if (resolved.startsWith(`${rootResolved}${windows ? '\\' : '/'}`)
-    || (windows && resolved.startsWith(`${rootResolved}/`))) {
-    return { contained: true, resolved }
-  }
+  const boundary = windows ? /[\\/]$/.test(rootResolved) ? '' : '\\' : '/'
+  if (resolved.startsWith(`${rootResolved}${boundary}`)) return { contained: true, resolved }
   return { contained: false, resolved, reason: 'outside-workspace' }
 }
 
@@ -1363,13 +1479,23 @@ export function normalizeUserPath(raw, options = {}) {
   // A UNC path (`\\server\\share`) keeps its double lead: that is a root, not an escape.
   if (!text.startsWith('\\\\')) text = text.replace(/\\([\\ '"`])/g, '$1')
 
-  // `file://` URLs: drop the scheme, then the leading slash before a drive letter.
-  if (/^file:\/\//i.test(text)) {
-    text = text.slice('file://'.length)
-    try { text = decodeURIComponent(text) } catch { /* keep the raw text */ }
-    if (/^\/[A-Za-z]:[\\/]/.test(text)) text = text.slice(1)
-    text = text.trim()
+  // A device namespace (`\\?\C:`) and a drive-relative word (`C:foo`) name no
+  // file this plugin can place, so both are refused instead of resolved.
+  const form = classifyPathForm(text)
+  if (form === 'device') return refuse('device-path')
+  // `D:` alone still names the root of a mounted drive, so it reaches the mount
+  // mapping below; any other `D:foo` is relative to that drive's current folder.
+  const bareDrive = /^[A-Za-z]:$/.test(text)
+  if (form === 'drive-relative' && !bareDrive) return refuse('drive-relative')
+
+  // `file://` URLs go through the same decoder the shell analysis uses, so the
+  // panel and the gate cannot disagree about `file:///C:/x`.
+  const fromUrl = text.startsWith('/') || /^[A-Za-z]:/.test(text) ? undefined : fileUrlPath(text)
+  if (fromUrl !== undefined) {
+    text = fromUrl.trim()
     if (text === '') return refuse('empty')
+  } else if (/^file:\/\//i.test(text)) {
+    return refuse('bad-url')
   }
 
   // Under WSL a Windows drive is a mount point (`C:\Users\me` is reachable as
@@ -1396,6 +1522,8 @@ export function normalizeUserPath(raw, options = {}) {
     }
   }
 
+  // A bare drive that had no mount mapping cannot be placed either.
+  if (classifyPathForm(text) === 'drive-relative') return refuse('drive-relative')
   const windows = options.windows === true || /^[A-Za-z]:[\\/]/.test(text) || text.startsWith('\\\\')
   const separator = windows ? '\\' : '/'
   if (windows) text = text.replace(/\//g, '\\')
@@ -1425,7 +1553,9 @@ export function normalizeUserPath(raw, options = {}) {
     joined = `${root.replace(/[\\/]+$/, '')}${separator}${text}`
   }
 
-  const parts = joined.split(/[\\/]+/)
+  // A backslash separates only on Windows; on POSIX it is an ordinary filename
+  // character, so `/home/user/a\\b` stays one segment instead of becoming a folder.
+  const parts = joined.split(windows ? /[\\/]+/ : /\//)
   const head = windows ? (parts[0] ?? '') : ''
   const rest = windows ? parts.slice(1) : parts
   const out = []

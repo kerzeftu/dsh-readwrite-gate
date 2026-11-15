@@ -49,16 +49,47 @@ splitHeredocs → tokenizeShell → walkScript
 
 `optionTakesValue(option, next)` 的原则：**只有下一词既不是选项、又不像路径时才算选项值**。否则像 `rm -f victim` 这种就会把 victim 吞掉，漏判一次删除。
 
+## 路径形态、文件 URL 与折叠
+
+判定前先把词归到一种**形态**（`classifyPathForm`），再按形态折叠（`foldPath`）：
+
+| 形态 | 例子 | 处理 |
+|---|---|---|
+| `root` | `/etc/hosts`、`\temp\x` | POSIX 从 `/` 开始；Windows 上借基准路径所在的盘符或共享根补齐 |
+| `drive` | `C:\Users\me`、`C:/Users/me` | 保留盘符，`..` 最多退到 `C:\` |
+| `unc` | `\\server\share\x`、`//server/share/x` | 以 `server\share` 为锚，`..` 不能退到共享之外 |
+| `drive-relative` | `C:work` | 相对“该盘当前目录”，无法确定，**拒绝**（`drive-relative`） |
+| `device` | `\\?\C:\x`、`\\.\PhysicalDrive0` | 设备命名空间，**拒绝**（`device-path`） |
+| `relative` | `notes.txt` | 按基准目录拼接后再折叠 |
+
+两条容易写错的规则：
+
+- POSIX 上反斜杠是**文件名的一部分**，只有 Windows 形态才把它当分隔符。早期实现按两种分隔符一起切，
+  会把 `/etc\passwd` 读成 `/etc/passwd`，也会把 `/home/user/a\b` 拆成两层目录。
+- 大小写：Windows 形态比较时转小写，POSIX 保持原样。大小写敏感目录上的授权按 POSIX 规则判定。
+
+`file:` URL 只有一个解码入口 `fileUrlPath`：`file:///etc/hosts` → `/etc/hosts`，
+`file:///C:/Users/me` → `C:/Users/me`，`file://server/share/x` → `//server/share/x`，
+百分号转义会解码。手动输入路径（`normalizeUserPath`）复用同一个入口，所以面板和闸门对同一个
+URL 不会给出两种路径。
+
+Windows 规则可以在任何平台上验证：`foldPath` / `containsPath` 接受 `{ windows: true }`，
+`test/check-paths.mjs` 就是靠它把共享根、盘符、设备路径、大小写这些用例跑在 Linux CI 上。
+
 ## 绝对化、canonical 化与临时区
 
 判定前先把路径统一处理（顺序不能换）：
 
-1. **定基**：相对路径按 `scopeBaseOf(args, root)` 得到的工作目录解析（`workdir` / `cwd` / 会话根）。
-   早期实现直接拿相对词去比工作区，被 `/tmp` 前缀吸收，导致“区外目录里 `cat ./secret`”被放行。
-2. **折叠**：`canonicalPathOf(path)` = `realpathSync` 解析软链；路径不存在时逐级 canonical 化父目录再拼回来。上限缓存 4096 条。
+1. **定基**：相对路径按 `scopeBaseOf(args, root)` 得到的工作目录解析（`workdir` / `cwd` / 会话根），
+   再由 `absolutePathOf` 走上面的 `foldPath` 得到绝对词。设备路径与盘符相对路径在这里就返回 `undefined`，
+   按“区外”处理。早期实现直接拿相对词去比工作区，被 `/tmp` 前缀吸收，导致“区外目录里 `cat ./secret`”被放行。
+2. **折叠**：`canonicalPathOf(path)` = `realpathSync` 解析软链；路径不存在时取最长的已存在祖先逐级解析再拼回来，
+   分隔符按 `/` 与 `\` 中较晚的一个切。缓存 2 秒过期（链接改指后能重新解析），超过 4096 条整体清空。
    作用：工作区里指向区外的软链必须按区外处理；`a/../b` 与 `b` 必须是同一行。
-3. **临时区**：`insideTempArea(absolute)` 只接受**绝对路径**，命中 `/tmp` 或 `os.tmpdir()` 即视为内部。相对词不再被它吞掉。
-4. **包含判断**：`containsPath(canonical, canonicalRoot, canonicalRoot)`，按平台分隔符（POSIX 只认 `/`，Windows 两种都认）。
+3. **临时区**：`insideTempArea(absolute)` 只接受带锚点的绝对路径（`root` / `drive` / `unc`），
+   命中 `/tmp` 或 `os.tmpdir()` 即视为内部；原生 Windows 上只认 `os.tmpdir()`，不认字面量 `/tmp`。
+4. **包含判断**：`containsPath(canonical, canonicalRoot, canonicalRoot)`，按平台分隔符（POSIX 只认 `/`，Windows 两种都认）；
+   设备路径与盘符相对路径直接返回原因，不参与比较。
 
 ## opaque
 
@@ -73,6 +104,9 @@ splitHeredocs → tokenizeShell → walkScript
 - `containsPath` 是词法折叠 + canonical 化，不是内核级校验；`openat2(RESOLVE_BENEATH)` 那类语义做不到，只能尽量贴近。
 - 命令的 `cd` 链只解析到能静态确定的程度；变量拼接出来的目录按 opaque 处理。
 - 路径里含不可见字符、超长、`~其他用户` 会被拒绝并给出原因（`PATH_ERRORS`）。
+- 面板的手动输入（`normalizeUserPath`）还不按基准盘符补齐 `\temp\x` 这类根相对路径：
+  Windows 上它保留原样，闸门侧（`foldPath`）才补齐。两边在“是否在范围内”上仍一致，
+  但面板回显的字符串可能与闸门解析结果不同。
 
 改这一层的正确姿势：先写一个能复现误判的断言（`check-gate.mjs` 或 `test/delegation.test.mjs`），再改规则，最后跑负向对照确认断言真能红。
 

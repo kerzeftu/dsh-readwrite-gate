@@ -108,6 +108,16 @@
 
 主要影响：`functions.js`、`index.js`、路径与 gate 测试、路径文档。
 
+## 阶段二验收记录（1.4.0）
+
+已完成：`classifyPathForm` / `foldPath` 成为唯一折叠入口；`fileUrlPath` 统一 `file:///C:/`、
+`file://server/share/`、`localhost` 与百分号转义，`normalizeUserPath` 复用之；共享根以 `server\share`
+为锚；`C:work` 与 `\\?\C:` 明确拒绝；临时区在原生 Windows 只认 `os.tmpdir()`；canonical 缓存 2 秒过期、
+父目录回退认两种分隔符。用例在 `test/check-paths.mjs`，跨平台纯词法，不依赖本机目录。
+
+未完成（转阶段三）：面板手动输入不按盘符补齐根相对路径；命令解释器仍按 POSIX 语法分析；
+目录快捷入口仍读 `/mnt`；CI 仍只有 Ubuntu。
+
 ## 阶段三：命令解释器与目录选择适配
 
 ### A. 命令解释器
