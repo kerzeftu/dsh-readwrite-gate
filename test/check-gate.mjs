@@ -362,14 +362,74 @@ const pythonInWorkspace = (separator, path) => [
   'PY',
   'cd /opt',
 ].join('\n')
-for (const separator of [' && ', '\n']) {
-  const command = pythonInWorkspace(separator, 'paper-source.md')
-  check('Python heredoc resolves its relative target at invocation',
-    analyzeShell(command).readPaths, [`${ROOT}/sub/paper-source.md`])
-  check('Python heredoc inside does not use outside workdir as its base',
-    await verdict('workspace-access', ['bash', { command, workdir: '/opt' }]), 'allow')
-  check('Python heredoc inside opens no dialog', askCount, 0)
+const guardedPython = pythonInWorkspace(' && ', 'paper-source.md')
+check('guarded Python heredoc resolves its relative target at invocation',
+  analyzeShell(guardedPython).readPaths, [`${ROOT}/sub/paper-source.md`])
+check('guarded Python heredoc does not use outside workdir as its base',
+  await verdict('workspace-access', ['bash', { command: guardedPython, workdir: '/opt' }]), 'allow')
+check('guarded Python heredoc opens no dialog', askCount, 0)
+const unguardedPython = pythonInWorkspace('\n', 'paper-source.md')
+check('unguarded Python heredoc retains the cd failure directory',
+  analyzeShell(unguardedPython).readPaths, [`${ROOT}/sub/paper-source.md`, 'paper-source.md'])
+check('unguarded Python heredoc asks from an outside workdir',
+  await verdict('workspace-access', ['bash', { command: unguardedPython, workdir: '/opt' }]), 'deny')
+check('unguarded Python heredoc names the possible outside target', lastDialog?.detail.includes('/opt/paper-source.md'), true)
+askCount = 0
+
+// Only access results should leave the child; its directory and variables do not.
+for (const child of [
+  `bash -c 'cd /opt && X=child.txt && cat "$X"'`,
+  `$(cd /opt && X=child.txt && cat "$X")`,
+  `(cd /opt && X=child.txt && cat "$X")`,
+]) {
+  const command = `X=parent.txt; ${child}; cat "$X"`
+  check('child access is retained without exporting its environment',
+    analyzeShell(command).readPaths, ['/opt/child.txt', 'parent.txt'])
 }
+check('child cwd does not create a false outside dialog',
+  await verdict('workspace-access', shell("bash -c 'cd /opt'; cat local.txt")), 'allow')
+check('child cwd does not create a dialog', askCount, 0)
+check('child reading an outside file still requests authorization',
+  await verdict('workspace-access', shell("bash -c 'cd /opt && cat child.txt'; cat local.txt")), 'deny')
+check('child outside read is the path listed', lastDialog?.detail.includes('/opt/child.txt'), true)
+askCount = 0
+
+check('OR reads from the incoming cwd on cd failure',
+  analyzeShell('cd /opt || cat local.txt').readPaths, ['local.txt'])
+check('a later unconditional command considers both cd results',
+  analyzeShell('cd /opt; cat local.txt').readPaths, ['/opt/local.txt', 'local.txt'])
+check('AND/OR chains carry distinct cwd states',
+  analyzeShell('cd /opt && cat good.txt || cat fallback.txt').readPaths,
+  ['/opt/good.txt', '/opt/fallback.txt', 'fallback.txt'])
+check('pipeline stages do not export their cwd',
+  analyzeShell('cd /opt | cat piped.txt; cat local.txt').readPaths, ['piped.txt', 'local.txt'])
+check('a grouped pipeline stage can change its own directory',
+  analyzeShell('printf data | (cd /opt && cat piped.txt); cat local.txt').readPaths, ['/opt/piped.txt', 'local.txt'])
+check('redirect operands use the cwd of their command branch',
+  analyzeShell('cd /opt || cat < fallback').readPaths, ['fallback'])
+const unknownDirectoryRead = 'cd "$UNSPECIFIED" && cat local.txt'
+check('unknown cd does not substitute a known relative target',
+  analyzeShell(unknownDirectoryRead).uncertainFamilies, ['read'])
+check('unknown relative read is refused under the default workspace policy',
+  await verdict('workspace-access', shell(unknownDirectoryRead)), 'deny')
+check('unknown relative read does not ask for a guessed directory grant', askCount, 0)
+check('an absolute operand stays determinate after an unknown cd',
+  analyzeShell(`cd "$UNSPECIFIED" && cat '${INSIDE}'`).readPaths, [INSIDE])
+
+const movingScript = `python3 -c "import os; os.chdir('/opt'); open('relative.txt'); open('${OUTSIDE}')"`
+const dynamicScript = `node -e "require('fs').readFileSync(process.env.INPUT_FILE)"`
+for (const [command, reason] of [[movingScript, 'script-cwd-change'], [dynamicScript, 'dynamic-script-path']]) {
+  const result = analyzeShell(command)
+  check('interpreted runtime paths are explicitly uncertain', result.uncertainFamilies, ['read', 'write'])
+  check('runtime path uncertainty has a specific cause', result.reason.includes(reason), true)
+  const blocked = await run('workspace-access', ...shell(command))
+  check('workspace scope refuses targets it cannot bound', blocked.kind, 'deny')
+  check('runtime path refusal explains the uncertainty', blocked.reason.includes('无法确定'), true)
+  check('unknown targets do not create a directory authorization', askCount, 0)
+}
+check('absolute script targets are retained', analyzeShell(movingScript).readPaths.includes(OUTSIDE), true)
+check('relative script targets after chdir are not tied to invocation cwd',
+  analyzeShell(movingScript).readPaths.some((path) => path.endsWith('relative.txt')), false)
 check('Python heredoc still asks about an explicit outside path',
   await verdict('workspace-access', shell(pythonInWorkspace(' && ', OUTSIDE))), 'deny')
 check('outside Python heredoc opens a dialog', askCount, 1)

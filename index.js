@@ -1159,6 +1159,12 @@ export function apply(ctx, config = {}) {
         || opaque
         || (side.kind === 'write' && operation.kind === 'write')
       if (!present) continue
+      // This is stronger than ordinary opaque code: we have evidence that an
+      // invocation-directory grant cannot describe the affected path family.
+      if (operation.uncertainFamilies?.includes(side.kind)
+        && (scope === 'workspace' || (side.kind === 'write' && delegatedScope !== undefined))) {
+        return { kind: 'deny', reason: refusal(side.kind, detail, 'unknown-paths') }
+      }
       // A named allowlist entry is an explicit, revision-proof user decision: it
       // admits its path even under the no-access level, because the entry
       // outranks the level the way an operator-set exception outranks a blanket
@@ -1192,7 +1198,8 @@ export function apply(ctx, config = {}) {
         // anywhere: that level's own sandbox refuses every write, so running a
         // script is not the plugin's call to make from a command line it cannot
         // read. A modification whose targets were recovered is still refused.
-        if (side.kind === 'write' && opaque && side.paths.length === 0) continue
+        if (side.kind === 'write' && opaque && side.paths.length === 0
+          && !operation.uncertainFamilies?.includes('write')) continue
         return { kind: 'deny', reason: refusal(side.kind, detail, 'level-scope') }
       }
       // A conversation-scoped grant admits the directories the user allowed and

@@ -594,12 +594,13 @@ export function analyzeShell(line) {
     targetDirs: new Set(),
     // Write paths that are directories themselves, so a grant can keep them whole.
     directoryWrites: new Set(),
+    uncertainFamilies: new Set(),
   }
   walkScript(text, state)
   const writePaths = dedupe(state.write)
   const readPaths = dedupe(state.read).filter((path) => !writePaths.includes(path))
   const opaque = state.opaque
-  const kind = writePaths.length > 0 || opaque || state.mayWrite ? 'write' : 'read'
+  const kind = writePaths.length > 0 || opaque || state.mayWrite || state.uncertainFamilies.has('write') ? 'write' : 'read'
   const reason = state.reasons.size > 0 ? [...state.reasons].join('+') : 'paths'
   return {
     kind,
@@ -611,6 +612,7 @@ export function analyzeShell(line) {
     mayWrite: state.mayWrite,
     targetDirs: [...state.targetDirs],
     writeDirTargets: writePaths.filter((path) => state.directoryWrites.has(path)),
+    uncertainFamilies: [...state.uncertainFamilies],
   }
 }
 
@@ -646,17 +648,51 @@ export function walkScript(text, state) {
   }
   let pending = []
   let bodies = []
-  const runPending = () => {
-    if (pending.length !== 0) runCommand(pending, state, bodies)
+  let effects = []
+  let connector = ''
+  let pipeline = false
+  let frames = [{ ...shellEnvironment(state), status: undefined }]
+  const selected = (frame) => connector === '&&' ? frame.status === true
+    : connector === '||' ? frame.status === false : true
+  const compact = (items) => {
+    const unique = [...new Map(items.map((item) => [JSON.stringify([
+      item.cwd, item.cwdKnown, [...item.vars], item.scopes.map((scope) => [scope.cwd, scope.cwdKnown, [...scope.vars]]), item.status,
+    ]), item])).values()]
+    if (unique.length <= 16) return unique
+    // Do not drop a possible directory on large chains. Widen to unknown.
+    const unknown = { cwd: undefined, cwdKnown: false, vars: new Map(), scopes: [] }
+    const depth = Math.max(...unique.map((item) => item.scopes.length))
+    const widened = { ...unknown, scopes: [] }
+    for (let index = 0; index < depth; index += 1) {
+      widened.scopes = [...widened.scopes, { ...widened }]
+    }
+    return [{ ...widened, status: true }, { ...widened, status: false }]
+  }
+  const runPending = (separator = '') => {
+    if (pending.length === 0 && effects.length === 0 && bodies.length === 0) return
+    const pipe = separator === '|' || separator === '|&'
+    frames = compact(frames.flatMap((before) => {
+      if (!selected(before)) return [before]
+      Object.assign(state, before, { vars: new Map(before.vars), scopes: [...before.scopes] })
+      for (const effect of effects) effect()
+      const changedDirectory = pending.length > 0 && runCommand(pending, state, bodies) === 'cd'
+      if (pipe) return [before]
+      const after = pipeline || separator === '&' ? before : shellEnvironment(state)
+      return [
+        { ...after, status: true },
+        { ...(changedDirectory || separator === '&' ? before : after), status: false },
+      ]
+    }))
     pending = []
     bodies = []
+    effects = []
+    if (!pipe) connector = separator
+    pipeline = pipe
   }
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]
     if (token.type === 'sub') {
-      state.depth += 1
-      walkScript(token.value, state)
-      state.depth -= 1
+      effects.push(() => walkChildScript(token.value, state))
       continue
     }
     if (token.type === 'op') {
@@ -669,7 +705,7 @@ export function walkScript(text, state) {
       if (value === '<' || value === '<<<' || /^\d+<$/.test(value)) {
         const target = tokens[index + 1]
         if (target !== undefined && target.type === 'word') {
-          recordWord(target, 'read', state)
+          if (value !== '<<<') effects.push(() => recordWord(target, 'read', state, { bare: true }))
           index += 1
         }
         continue
@@ -684,7 +720,10 @@ export function walkScript(text, state) {
       if (value === '>' || value === '>>' || value === '<>' || value === '&>' || value === '&>>' || /^\d+>$/.test(value) || /^\d+>>$/.test(value)) {
         const target = tokens[index + 1]
         if (target !== undefined && target.type === 'word') {
-          recordWord(target, 'write', state)
+          effects.push(() => {
+            recordWord(target, 'write', state, { bare: true })
+            if (value === '<>') recordWord(target, 'read', state, { bare: true })
+          })
           index += 1
         } else {
           state.reasons.add('redirect-without-target')
@@ -694,25 +733,55 @@ export function walkScript(text, state) {
       }
       if (value === '(') {
         runPending()
-        state.scopes.push({ cwd: state.cwd, cwdKnown: state.cwdKnown, vars: new Map(state.vars) })
+        frames = frames.map((frame) => ({ ...frame, scopes: [...frame.scopes, frame] }))
+        connector = ''
+        pipeline = false
         continue
       }
       if (value === ')') {
         runPending()
-        const saved = state.scopes.pop()
-        if (saved !== undefined) {
-          state.cwd = saved.cwd
-          state.cwdKnown = saved.cwdKnown
-          state.vars = saved.vars
-        }
+        frames = compact(frames.flatMap((frame) => {
+          const saved = frame.scopes.at(-1)
+          if (saved === undefined) return [frame]
+          return [{ ...saved, status: true }, { ...saved, status: false }]
+        }))
+        connector = ''
+        pipeline = false
         continue
       }
-      runPending()
+      const hasCommand = pending.length > 0 || effects.length > 0 || bodies.length > 0
+      runPending(value)
+      if (!hasCommand && (value === '&&' || value === '||')) connector = value
+      if (!hasCommand && (value === '|' || value === '|&')) pipeline = true
       continue
     }
     pending.push(token)
   }
   runPending()
+  const first = frames[0]
+  if (first !== undefined) {
+    const cwdKnown = frames.every((frame) => frame.cwdKnown && frame.cwd === first.cwd)
+    const vars = new Map([...first.vars].filter(([name, values]) =>
+      frames.every((frame) => JSON.stringify(frame.vars.get(name)) === JSON.stringify(values))))
+    Object.assign(state, { cwd: cwdKnown ? first.cwd : undefined, cwdKnown, vars })
+  }
+}
+
+function shellEnvironment(state) {
+  return { cwd: state.cwd, cwdKnown: state.cwdKnown, vars: new Map(state.vars), scopes: [...state.scopes] }
+}
+
+/** Keep access results, but never carry a child shell's environment back. */
+function walkChildScript(text, state) {
+  const saved = shellEnvironment(state)
+  state.scopes = []
+  state.depth += 1
+  try {
+    walkScript(text, state)
+  } finally {
+    state.depth -= 1
+    Object.assign(state, saved)
+  }
 }
 
 /**
@@ -771,10 +840,14 @@ function runCommand(tokens, state, bodies = []) {
   const exe = executable
 
   if (exe === 'cd') {
-    const target = args[0] === undefined ? undefined : expandWord(args[0], state)
-    if (target === undefined || target.length === 0) state.cwdKnown = false
-    else state.cwd = resolveText(target[0], state.cwd)
-    return
+    if (guard > 0) return
+    const targets = args.length === 1 && !args[0].value.startsWith('-') ? expandWord(args[0], state) : []
+    const target = targets.length === 1 ? targets[0] : undefined
+    const absolute = target !== undefined && isAbsolutePathText(target)
+    state.cwdKnown = target !== undefined && !target.startsWith('~') && (absolute || state.cwdKnown)
+    state.cwd = state.cwdKnown ? resolveText(target, state.cwd) : undefined
+    // Success changes the directory; failure preserves the incoming environment.
+    return 'cd'
   }
   if (exe === 'eval') {
     const inner = args.map((token) => token.value).join(' ')
@@ -793,20 +866,10 @@ function runCommand(tokens, state, bodies = []) {
   if (SHELL_EXECUTABLES.has(exe)) {
     const code = flagValue(args, ['-c'])
     if (code !== undefined) {
-      state.depth += 1
-      walkScript(code, state)
-      state.depth -= 1
+      walkChildScript(code, state)
       return
     }
-    if (bodies.length > 0) {
-      const saved = { cwd: state.cwd, cwdKnown: state.cwdKnown, vars: state.vars, scopes: state.scopes }
-      state.vars = new Map(state.vars)
-      state.scopes = []
-      state.depth += 1
-      for (const body of bodies) walkScript(body, state)
-      state.depth -= 1
-      Object.assign(state, saved)
-    }
+    for (const body of bodies) walkChildScript(body, state)
     for (const token of args) recordWord(token, 'read', state)
     state.opaque = true
     state.reasons.add('shell-script')
@@ -1099,7 +1162,14 @@ function analyzeFind(args, state) {
   for (const token of roots) recordWord(token, deleting ? 'write' : 'read', state, { directory: deleting })
 }
 
-/** Analyze inline code: its string literals are the paths it names. */
+function markUncertain(state, reason, ...families) {
+  state.uncertainFamilies ??= new Set()
+  for (const family of families) state.uncertainFamilies.add(family)
+  state.reasons.add(reason)
+  state.opaque = true
+}
+
+/** Recover literal paths without assuming the script keeps its invocation directory. */
 function analyzeCode(code, state) {
   const text = String(code ?? '')
   state.opaque = true
@@ -1107,6 +1177,15 @@ function analyzeCode(code, state) {
   // directory it is judged against.
   state.targetDirs.add(literalCwd(state))
   const literal = /'([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)"|`([^`]*)`/g
+  // Scan code rather than the string contents for recognizable runtime inputs.
+  // This is deliberately a heuristic, not a parser for every script language.
+  const structure = text.replace(literal, (value) => ' '.repeat(value.length))
+  const cwdChange = /\b(?:chdir|SetCurrentDirectory|Set-Location)\s*(?:\(|(?=\s))/.exec(structure)?.index
+  if (cwdChange !== undefined) markUncertain(state, 'script-cwd-change', 'read', 'write')
+  if (/\b(?:getenv|readline|input)\s*\(|\b(?:process\.env|process\.argv|os\.environ|sys\.argv|ENV)\b|\b(?:path\.join|os\.path\.join|Join-Path)\b/.test(structure)
+    || /\b[fF]["'][^\n]*\{|`[^`]*\$\{/.test(text)) {
+    markUncertain(state, 'dynamic-script-path', 'read', 'write')
+  }
   let match = literal.exec(text)
   while (match !== null) {
     const raw = match[1] ?? match[2] ?? match[3] ?? ''
@@ -1115,9 +1194,12 @@ function analyzeCode(code, state) {
       const window = text.slice(Math.max(0, match.index - 60), match.index + value.length + 60)
       const writes = /(writeFileSync|writeFile|appendFile|createWriteStream|rmSync|rmdirSync|mkdirSync|renameSync|copyFileSync|copyFile|unlinkSync|unlink|truncateSync|truncate|chmodSync|chmod|write_text|write_bytes|openSync|os\.remove|os\.rename|os\.makedirs|os\.mkdir|shutil\.|Path\([^)]*\)\.(write|unlink|mkdir|touch)|to_csv|to_json|savefig|(?<![=!<>-])>{1,2}\s*[^=\s>])/.test(window)
       const mode = /['"](w|a|x|w\+|a\+|r\+)['"]/.test(window)
-      state[writes || mode ? 'write' : 'read'].push(
-        fileUrlPath(value) ?? resolveText(value, state.cwdKnown ? state.cwd : undefined),
-      )
+      const local = fileUrlPath(value)
+      const path = local ?? value
+      if (isAbsolutePathText(path)) state[writes || mode ? 'write' : 'read'].push(path)
+      else if (state.cwdKnown && (cwdChange === undefined || match.index < cwdChange)) {
+        state[writes || mode ? 'write' : 'read'].push(resolveText(path, state.cwd))
+      } else markUncertain(state, 'unknown-script-path-base', writes || mode ? 'write' : 'read')
     }
     match = literal.exec(text)
   }
@@ -1152,6 +1234,10 @@ function recordWord(token, side, state, options = {}) {
     // Reading a device is not a question about the workspace; writing one is.
     if (side === 'read' && target.startsWith('/dev/')) continue
     if (!bare && !looksLikePath(target)) continue
+    if (!state.cwdKnown && !isAbsolutePathText(target)) {
+      markUncertain(state, 'unknown-shell-path-base', side)
+      continue
+    }
     const resolved = local !== undefined ? local : resolveText(target, state.cwd)
     state[side].push(resolved)
     if (side === 'write' && directory) state.directoryWrites.add(resolved)
@@ -1212,13 +1298,18 @@ export function expandWord(token, state) {
 
 /** The directory text a call with no `cd` runs in, as the caller's own base. */
 function literalCwd(state) {
+  if (!state.cwdKnown) markUncertain(state, 'unknown-shell-path-base', 'read', 'write')
   return state.cwdKnown && state.cwd !== undefined ? state.cwd : '.'
+}
+
+function isAbsolutePathText(path) {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')
 }
 
 /** Join one path onto a base unless it is already absolute. */
 function resolveText(path, cwd) {
   if (typeof path !== 'string' || path === '') return path
-  if (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')) return path
+  if (isAbsolutePathText(path)) return path
   if (path.startsWith('~') || cwd === undefined) return path
   return `${String(cwd).replace(/[\\/]+$/, '')}/${path}`
 }
@@ -1284,6 +1375,7 @@ export function classifyTool(name, args, options = {}) {
       opaque: verdict.opaque,
       targetDirs: verdict.targetDirs ?? [],
       writeDirTargets: verdict.writeDirTargets ?? [],
+      uncertainFamilies: verdict.uncertainFamilies,
       command,
     }
   }

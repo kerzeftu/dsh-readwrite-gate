@@ -2,6 +2,12 @@
 
 公开仓库：<https://github.com/kerzeftu/dsh-readwrite-gate>（MIT）。
 
+## Unreleased
+
+### Fixed
+- 子 shell、命令替换和管道中的目录或变量变化不再误传到外层；按 `cd` 成败判断条件命令，分号或换行后的命令保留两种可能的目录。
+- 无法确认目录基准或识别到内联脚本使用运行时路径时，受限范围不再以启动目录代替实际目标。
+
 ## 1.4.1
 
 ### Changed
