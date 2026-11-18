@@ -884,9 +884,11 @@ export function apply(ctx, config = {}) {
     // containment test: a relative word has no meaning on its own, and testing
     // it against the temp root first swallowed outside working directories.
     const outside = []
+    const unresolved = new Set()
     for (const path of unique) {
       const absolute = absolutePathOf(path, scopeBase)
       if (absolute === undefined) {
+        unresolved.add(path)
         outside.push(path)
         continue
       }
@@ -910,7 +912,7 @@ export function apply(ctx, config = {}) {
     const grantedBy = session === undefined
       ? []
       : coveringEntries(outside, grantedPathsOf(session, kind), root, scopeBase)
-    return { kind, paths: unique, outside, admittedBy, grantedBy }
+    return { kind, paths: unique, outside, unresolved, admittedBy, grantedBy }
   }
 
   /**
@@ -1045,13 +1047,7 @@ export function apply(ctx, config = {}) {
           id: questionId,
           header: kind === 'write' ? '请求修改授权' : '请求访问授权',
           question: `模型请求${action}工作区之外的文件，是否允许？`,
-          detail: [
-            detail,
-            `工作区：${workspaceRoot(session) ?? '未知'}`,
-            kind === 'write'
-              ? '“允许修改”不等于“允许访问”：本对话的访问授权与本项分开授予。'
-              : '“允许访问”不等于“允许修改”：本对话的修改授权与本项分开授予。',
-          ].join('\n'),
+          detail,
           options: DIALOG_OPTIONS.map((option) => ({
             label: typeof option.label === 'function' ? option.label(kind) : option.label,
             description: typeof option.description === 'function' ? option.description(kind, dirs) : option.description,
@@ -1206,7 +1202,8 @@ export function apply(ctx, config = {}) {
       if (side.outside.length > 0) {
         if (scope === 'anywhere') continue
         const dirs = grantTargetsOf(side.kind, side.outside, operation)
-        const outcome = await askAuthorization(session, exec.agent, side.kind, detail, dirs, exec.signal)
+        const explanation = describeAuthorization(exec.name, classified, side)
+        const outcome = await askAuthorization(session, exec.agent, side.kind, explanation, dirs, exec.signal)
         if (outcome === 'allow-once' || outcome === 'allow-always') {
           // The dialog is asynchronous, and the user may have narrowed the level
           // while it was open. A `deny` level reached afterwards refuses the call
@@ -1444,8 +1441,45 @@ export function apply(ctx, config = {}) {
     },
   })
 
+  // The question service renders Markdown. Keep paths and command previews in
+  // indented code blocks and visibly quote controls that could change the layout.
+  function literalLine(value) {
+    const safe = value.replace(/[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/g,
+      (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`)
+    return `    ${safe}`
+  }
+
+  function describeAuthorization(name, { operation, root, scopeBase, opaque }, side) {
+    const paths = [...new Set(side.outside)]
+    const shown = paths.slice(0, 8)
+    const paragraphs = []
+    if (paths.some((path) => !side.unresolved.has(path))) {
+      paragraphs.push(root === undefined
+        ? '**请求原因：** 无法确定工作区，不能确认已解析路径在允许范围内。'
+        : '**请求原因：** 涉及工作区和临时目录以外的路径。')
+    }
+    if (side.unresolved.size > 0) {
+      paragraphs.push('部分路径无法解析为绝对路径，不能确认它们在允许范围内。')
+    }
+    if (opaque) paragraphs.push('命令的实际目标未能完全识别；下列路径可能包含用于判定的目录，不代表完整的访问清单。')
+    paragraphs.push('**触发授权的路径或目录**', shown.map((path) => literalLine(
+      side.unresolved.has(path) ? `${path}（未解析）` : path,
+    )).join('\n'))
+    if (paths.length > shown.length) paragraphs.push(`另有 ${paths.length - shown.length} 项未展示。`)
+    paragraphs.push('**工作区**', literalLine(root ?? '未知'),
+      '**相对路径的起始基准**（命令内部可能改变目录）', literalLine(scopeBase ?? '未知'))
+    if (operation.command) {
+      const command = operation.command.length > 160 ? `${operation.command.slice(0, 157)}...` : operation.command
+      paragraphs.push('**命令预览**', literalLine(command))
+    }
+    paragraphs.push('**调用工具**', literalLine(name), side.kind === 'write'
+      ? '读取和修改分别授权。即使同意修改，操作仍须通过 DSH 沙箱检查。'
+      : '允许读取不会授予修改权限。')
+    return paragraphs.join('\n\n')
+  }
+
   /**
-   * Describe one classified call for the dialog and the refusal message.
+   * Describe one classified call for the refusal message.
    * @param name - wire tool name.
    * @param operation - the classified operation.
    * @param outside - the paths that left the workspace.

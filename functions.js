@@ -414,7 +414,7 @@ function isAssignment(token) {
  * @param line - raw command line.
  * @returns `tokens`, plus whether the text ended inside an unterminated quote.
  */
-export function tokenizeShell(line) {
+export function tokenizeShell(line, { heredocs = false } = {}) {
   const text = typeof line === 'string' ? line : ''
   const tokens = []
   let current = ''
@@ -429,7 +429,41 @@ export function tokenizeShell(line) {
     hasCurrent = false
     quoted = false
   }
-  const pushOp = (value) => { pushWord(); tokens.push({ type: 'op', value }) }
+  const markers = []
+  let incompleteHeredoc = false
+  const pushOp = (value) => {
+    pushWord()
+    if (heredocs && (value === '<<' || value === '<<-')) markers.push(tokens.length)
+    tokens.push({ type: 'op', value })
+  }
+  const nextLine = (cursor) => {
+    pushOp('\n')
+    for (const marker of markers.splice(0)) {
+      const op = tokens[marker]
+      const delimiter = tokens[marker + 1]
+      if (delimiter?.type !== 'word' || cursor >= text.length) {
+        incompleteHeredoc = true
+        break
+      }
+      const start = cursor
+      while (cursor < text.length) {
+        const newline = text.indexOf('\n', cursor)
+        const end = newline < 0 ? text.length : newline
+        const line = text.slice(cursor, end)
+        const candidate = op.value === '<<-' ? line.replace(/^\t+/, '') : line
+        if (candidate === delimiter.value) {
+          const body = text.slice(start, cursor).replace(/\n$/, '')
+          op.body = op.value === '<<-' ? body.replace(/^\t+/gm, '') : body
+          op.bodyRange = [start, newline < 0 ? end : end + 1]
+          cursor = op.bodyRange[1]
+          break
+        }
+        cursor = newline < 0 ? end : end + 1
+      }
+      if (op.body === undefined) incompleteHeredoc = true
+    }
+    return cursor
+  }
   while (index < text.length) {
     const char = text[index]
     if (quote !== '') {
@@ -444,8 +478,7 @@ export function tokenizeShell(line) {
     if (char === '#' && !hasCurrent) {
       const end = text.indexOf('\n', index)
       if (end === -1) break
-      pushOp('\n')
-      index = end + 1
+      index = nextLine(end + 1)
       continue
     }
     if (char === '`') {
@@ -479,14 +512,14 @@ export function tokenizeShell(line) {
     }
     const three = text.slice(index, index + 3)
     const two = text.slice(index, index + 2)
-    if (three === '<<<' || three === '&>>') { pushOp(three); index += 3; continue }
+    if (three === '<<<' || three === '&>>' || three === '<<-') { pushOp(three); index += 3; continue }
     if (two === '&&' || two === '||' || two === '>>' || two === '<<' || two === '<>'
       || two === '&>' || two === '>&' || two === '<&' || two === '|&') {
       pushOp(two)
       index += 2
       continue
     }
-    if (char === '\n') { pushOp('\n'); index += 1; continue }
+    if (char === '\n') { index = nextLine(index + 1); continue }
     if ('|;&()'.includes(char)) { pushOp(char); index += 1; continue }
     if (char === '>' || char === '<') {
       if (/^\d+$/.test(current)) {
@@ -508,51 +541,30 @@ export function tokenizeShell(line) {
     index += 1
   }
   pushWord()
-  return { tokens, unterminated: quote !== '' }
+  return { tokens, unterminated: quote !== '' || incompleteHeredoc || markers.length > 0 }
 }
 
-/**
- * Lift heredoc bodies out of a line so the tokenizer only ever sees commands.
- * Each body is paired with the command word that owns it, because a body fed to
- * an interpreter is code while a body fed to `cat` is data.
- * @param line - the raw command line, possibly several lines long.
- * @returns the `script` without bodies, and the `bodies` with their owners.
- */
+/** Split shell source for diagnostics; the analyzer uses the attached tokens. */
 export function splitHeredocs(line) {
   const text = typeof line === 'string' ? line : ''
-  const lines = text.split('\n')
-  const kept = []
+  const { tokens } = tokenizeShell(text, { heredocs: true })
   const bodies = []
-  for (let index = 0; index < lines.length; index += 1) {
-    const lineText = lines[index]
-    kept.push(lineText)
-    const marker = /<<-?\s*(?:"([^"]+)"|'([^']+)'|\\?([A-Za-z0-9_."'\\-]+))/.exec(lineText)
-    if (marker === null) continue
-    const delimiter = marker[1] ?? marker[2] ?? marker[3] ?? ''
-    if (delimiter === '') continue
-    const stripTabs = /<<-/.test(marker[0])
-    const body = []
-    let cursor = index + 1
-    for (; cursor < lines.length; cursor += 1) {
-      const candidate = stripTabs ? lines[cursor].replace(/^\t+/, '') : lines[cursor]
-      if (candidate === delimiter) break
-      body.push(lines[cursor])
-    }
-    bodies.push({ owner: commandWordOf(lineText), text: body.join('\n') })
-    index = cursor
-  }
-  return { script: kept.join('\n'), bodies }
-}
-
-/** The command word of one line, ignoring assignments and redirects. */
-function commandWordOf(line) {
-  const { tokens } = tokenizeShell(line.split('<<')[0] ?? line)
+  let script = ''
+  let end = 0
+  let owner = ''
   for (const token of tokens) {
-    if (token.type !== 'word') continue
-    if (isAssignment(token)) continue
-    return baseName(token.value)
+    if (token.bodyRange !== undefined) {
+      const [start, stop] = token.bodyRange
+      script += text.slice(end, start)
+      end = stop
+      bodies.push({ owner, text: token.body })
+    } else if (token.type === 'op') {
+      if (['\n', '&&', '||', ';', '|', '|&', '&', '(', ')'].includes(token.value)) owner = ''
+    } else if (token.type === 'word' && owner === '' && !isAssignment(token)) {
+      owner = baseName(token.value)
+    }
   }
-  return ''
+  return { script: script + text.slice(end), bodies }
 }
 
 /**
@@ -566,7 +578,6 @@ function commandWordOf(line) {
  */
 export function analyzeShell(line) {
   const text = typeof line === 'string' ? line : ''
-  const { script, bodies } = splitHeredocs(text)
   const state = {
     cwd: undefined,
     cwdKnown: true,
@@ -584,16 +595,7 @@ export function analyzeShell(line) {
     // Write paths that are directories themselves, so a grant can keep them whole.
     directoryWrites: new Set(),
   }
-  walkScript(script, state)
-  for (const body of bodies) {
-    if (body.text.trim() === '') continue
-    if (SHELL_EXECUTABLES.has(body.owner) || body.owner === '' || body.owner === 'eval') {
-      walkScript(body.text, state)
-      continue
-    }
-    if (SCRIPT_HOSTS.has(body.owner)) analyzeCode(body.text, state)
-    // A body fed to anything else is data: it names no path by itself.
-  }
+  walkScript(text, state)
   const writePaths = dedupe(state.write)
   const readPaths = dedupe(state.read).filter((path) => !writePaths.includes(path))
   const opaque = state.opaque
@@ -636,16 +638,18 @@ export function walkScript(text, state) {
     state.targetDirs.add(literalCwd(state))
     return
   }
-  const { tokens, unterminated } = tokenizeShell(text)
+  const { tokens, unterminated } = tokenizeShell(text, { heredocs: true })
   if (unterminated) {
-    state.reasons.add('unterminated-quote')
+    state.reasons.add('unterminated-source')
     state.opaque = true
+    state.targetDirs.add(literalCwd(state))
   }
   let pending = []
+  let bodies = []
   const runPending = () => {
-    if (pending.length === 0) return
-    runCommand(pending, state)
+    if (pending.length !== 0) runCommand(pending, state, bodies)
     pending = []
+    bodies = []
   }
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]
@@ -657,7 +661,11 @@ export function walkScript(text, state) {
     }
     if (token.type === 'op') {
       const value = token.value
-      if (value === '<<') { index += 1; continue }
+      if (value === '<<' || value === '<<-') {
+        if (token.body !== undefined) bodies.push(token.body)
+        if (tokens[index + 1]?.type === 'word') index += 1
+        continue
+      }
       if (value === '<' || value === '<<<' || /^\d+<$/.test(value)) {
         const target = tokens[index + 1]
         if (target !== undefined && target.type === 'word') {
@@ -713,7 +721,7 @@ export function walkScript(text, state) {
  * @param tokens - the command's tokens.
  * @param state - the running analysis state.
  */
-function runCommand(tokens, state) {
+function runCommand(tokens, state, bodies = []) {
   let index = 0
   const assignments = []
   while (index < tokens.length && (isAssignment(tokens[index]) || RESERVED_WORDS.has(tokens[index].value))) {
@@ -790,6 +798,15 @@ function runCommand(tokens, state) {
       state.depth -= 1
       return
     }
+    if (bodies.length > 0) {
+      const saved = { cwd: state.cwd, cwdKnown: state.cwdKnown, vars: state.vars, scopes: state.scopes }
+      state.vars = new Map(state.vars)
+      state.scopes = []
+      state.depth += 1
+      for (const body of bodies) walkScript(body, state)
+      state.depth -= 1
+      Object.assign(state, saved)
+    }
     for (const token of args) recordWord(token, 'read', state)
     state.opaque = true
     state.reasons.add('shell-script')
@@ -804,7 +821,8 @@ function runCommand(tokens, state) {
       recordWord(token, 'read', state)
     }
     if (code !== undefined) analyzeCode(code, state)
-    else {
+    for (const body of bodies) analyzeCode(body, state)
+    if (code === undefined) {
       state.opaque = true
       state.reasons.add('arbitrary-script')
       state.targetDirs.add(literalCwd(state))
@@ -1097,7 +1115,9 @@ function analyzeCode(code, state) {
       const window = text.slice(Math.max(0, match.index - 60), match.index + value.length + 60)
       const writes = /(writeFileSync|writeFile|appendFile|createWriteStream|rmSync|rmdirSync|mkdirSync|renameSync|copyFileSync|copyFile|unlinkSync|unlink|truncateSync|truncate|chmodSync|chmod|write_text|write_bytes|openSync|os\.remove|os\.rename|os\.makedirs|os\.mkdir|shutil\.|Path\([^)]*\)\.(write|unlink|mkdir|touch)|to_csv|to_json|savefig|(?<![=!<>-])>{1,2}\s*[^=\s>])/.test(window)
       const mode = /['"](w|a|x|w\+|a\+|r\+)['"]/.test(window)
-      state[writes || mode ? 'write' : 'read'].push(value)
+      state[writes || mode ? 'write' : 'read'].push(
+        fileUrlPath(value) ?? resolveText(value, state.cwdKnown ? state.cwd : undefined),
+      )
     }
     match = literal.exec(text)
   }

@@ -24,13 +24,13 @@
 `analyzeShell(line)` 是一条流水线：
 
 ```
-splitHeredocs → tokenizeShell → walkScript
+tokenizeShell（将 heredoc 正文附到对应重定向）→ walkScript
    ├── 重定向（`>`、`>>`、`2>`、`>&`）→ 写目标
    ├── 包装命令（env/sudo/timeout/xargs…）→ 解开再看里面的命令
    ├── 赋值（`X=/etc/passwd`）→ 记住，后面 `"$X"` 展开时用
    ├── 只读命令（cat/head/grep/sed…）→ 位置参数即读路径
    ├── 写命令（cp/mv/rm/mkdir/dd…）→ 按 applyWriteRule 决定哪个参数是目标
-   ├── 脚本宿主（node/python/bash -c…）→ 递归 walkScript 脚本体
+   ├── 脚本宿主（node/python/bash…）→ 按调用时目录分析内联代码或 heredoc；cat 的正文按数据处理
    └── 未知程序 → opaque
 ```
 

@@ -150,6 +150,9 @@ check('workspace-access read inside', await verdict('workspace-access', read(INS
 check('workspace-access read outside asks and is refused', await verdict('workspace-access', read(OUTSIDE)), 'deny')
 check('workspace-access asked once', askCount, 1)
 check('workspace-access dialog header', lastDialog?.header, '请求访问授权')
+check('read dialog names the outside reason', lastDialog?.detail.includes('涉及工作区和临时目录以外的路径'), true)
+check('read dialog lists the resolved target separately', lastDialog?.detail.includes(`**触发授权的路径或目录**\n\n    ${OUTSIDE}`), true)
+check('read dialog includes the workspace', lastDialog?.detail.includes(`**工作区**\n\n    ${ROOT}`), true)
 check('workspace-access dialog options', lastDialog?.options.map((o) => o.label), ['不允许', '仅一次', '该对话中总是可以访问'])
 check('dialog grant label names the family', [lastDialog?.options[2].label], ['该对话中总是可以访问'])
 check('workspace-access write inside', await verdict('workspace-access', write(INSIDE)), 'allow')
@@ -157,10 +160,19 @@ check('workspace-access write inside opens no dialog', askCount, 0)
 check('workspace-access write outside asks', await verdict('workspace-access', write(OUTSIDE)), 'deny')
 check('workspace-access write outside was asked', askCount, 1)
 check('workspace-access write outside header', lastDialog?.header, '请求修改授权')
+check('write dialog warns about the separate sandbox check', lastDialog?.detail.includes('仍须通过 DSH 沙箱检查'), true)
 check('workspace-access shell rm outside asks', await verdict('workspace-access', shell('rm -rf /opt/x')), 'deny')
 check('workspace-access shell rm outside was asked', askCount, 1)
 check('workspace-access shell ls outside asks', await verdict('workspace-access', shell('ls /opt')), 'deny')
 check('workspace-access shell listed the dialog', askCount, 1)
+check('unresolved path still asks and fails closed', await verdict('workspace-access', read('~someone/relative.txt')), 'deny')
+check('unresolved path was not presented as a resolved target', lastDialog?.detail.includes('~someone/relative.txt（未解析）'), true)
+check('path with a line break still asks', await verdict('workspace-access', read('/opt/note\n# Heading.txt')), 'deny')
+check('line breaks in a path stay literal inside the explanation', lastDialog?.detail.includes('/opt/note\\u000a# Heading.txt'), true)
+const morePaths = Array.from({ length: 9 }, (_, i) => `/opt/dialog/dir-${i}/file.txt`)
+check('a multi-path request still asks', await verdict('workspace-access', shell(`cat ${morePaths.join(' ')}`)), 'deny')
+check('a long list reports hidden targets', lastDialog?.detail.includes('另有 1 项未展示。'), true)
+check('display truncation leaves the standing grant scope intact', lastDialog?.options[2].description.includes('/opt/dialog/dir-8/'), true)
 
 // The platform temp area (`/tmp` and `os.tmpdir()`) counts as inside the
 // sandbox's writable roots, so neither family asks about it — a dialog there
@@ -343,6 +355,26 @@ check('in-place edit inside', await verdict('workspace-write', shell(`sed -i s/a
 check('in-place edit opens no dialog', askCount, 0)
 check('heredoc writing inside', await verdict('workspace-write', shell(HEREDOC_INSIDE)), 'allow')
 check('heredoc opens no dialog', askCount, 0)
+const pythonInWorkspace = (separator, path) => [
+  `cd '${ROOT}/sub'${separator}python3 - <<'PY'`,
+  `p = '${path}'`,
+  "s = open(p, encoding='utf8').read()",
+  'PY',
+  'cd /opt',
+].join('\n')
+for (const separator of [' && ', '\n']) {
+  const command = pythonInWorkspace(separator, 'paper-source.md')
+  check('Python heredoc resolves its relative target at invocation',
+    analyzeShell(command).readPaths, [`${ROOT}/sub/paper-source.md`])
+  check('Python heredoc inside does not use outside workdir as its base',
+    await verdict('workspace-access', ['bash', { command, workdir: '/opt' }]), 'allow')
+  check('Python heredoc inside opens no dialog', askCount, 0)
+}
+check('Python heredoc still asks about an explicit outside path',
+  await verdict('workspace-access', shell(pythonInWorkspace(' && ', OUTSIDE))), 'deny')
+check('outside Python heredoc opens a dialog', askCount, 1)
+check('quoted heredoc syntax does not hide the following command',
+  analyzeShell(`echo '<<EOF'\ncat ${OUTSIDE}`).readPaths, [OUTSIDE])
 check('pipeline writing inside', await verdict('workspace-write', shell(PIPELINE_INSIDE)), 'allow')
 check('removing a workspace path', await verdict('workspace-write', shell(`rm -rf ${ROOT}/sub`)), 'allow')
 check('removing a workspace path opens no dialog', askCount, 0)
@@ -377,6 +409,7 @@ check('opaque script at workspace-write opens no dialog', askCount, 0)
 dialogAnswer = '该对话中总是可以访问'
 askCount = 0
 check('an opaque script from an outside directory asks and is allowed', await verdict('workspace-access', shell('cd /opt && node build.mjs')), 'allow')
+check('opaque dialog does not present an exhaustive target list', lastDialog?.detail.includes('不代表完整的访问清单'), true)
 check('the outside directory was asked about', askCount, 1)
 check('the dialog names the directory', lastDialog?.detail.includes('/opt'), true)
 check('the answer records the directory', (commands.get('access-allow').handler({ agent, rawInput: 'list' })?.text ?? '').includes('/opt/（读'), true)
@@ -604,6 +637,9 @@ check('a file url resolves to its path', analyzer('curl file:///etc/passwd').rea
 // A relative path in an outside working directory is not a temp path.
 check('an outside workdir relative read asks', await verdict('workspace-access', ['bash', { command: 'cat ./secret.txt', workdir: '/opt/private' }]), 'deny')
 check('the outside workdir relative read was asked', askCount, 1)
+check('shell dialog lists the resolved target, not just the command', lastDialog?.detail.includes('\n\n    /opt/private/secret.txt\n'), true)
+check('shell dialog names the actual starting base', lastDialog?.detail.includes('**相对路径的起始基准**（命令内部可能改变目录）\n\n    /opt/private\n'), true)
+check('shell dialog retains a literal command preview', lastDialog?.detail.includes('**命令预览**\n\n    cat ./secret.txt'), true)
 check('a relative path does not resolve against the temp root', await verdict('workspace-access', ['bash', { command: 'cat ../../etc/hosts', workdir: '/opt/private' }]), 'deny')
 
 // A symlink inside the workspace that points outside it must not read as inside.
