@@ -4,13 +4,12 @@
 
 | 位置 | 内容 | 跑法 |
 |------|------|------|
-| `test/delegation.test.mjs` | 随包测试：委派继承、写切片、解析边角（`file://`、箭头函数、`2>&1`） | `node test/delegation.test.mjs` |
-| `test/check-*.mjs` | 六套自检，覆盖宿主行为、界面、座位、文档一致性 | `npm test` |
+| `test/delegation.test.mjs` | 委派继承、写切片、解析边角（`file://`、箭头函数、`2>&1`） | `node test/delegation.test.mjs` |
+| `test/check-*.mjs` | 八套自检，覆盖宿主行为、界面、路径和授权存储 | `npm test` |
 
-六套自检是开发资产，依赖宿主 checkout（仅 `check-seat.mjs` 的宿主契约段需要；没有 checkout 时自动跳过）
-与各脚本自带的测试桩，因此**不随 npm 包发布**。
+测试保留在仓库，不随 npm 包发布。默认使用自带桩；`check-seat.mjs` 在能找到宿主 checkout 时，还会验证宿主契约。
 
-## 六套自检各测什么
+## 各套自检测什么
 
 | 脚本 | 断言的层次 | 典型内容 |
 |------|------------|----------|
@@ -20,16 +19,30 @@
 | `check-visual.mjs` | 源码 + 渲染 | 五档配色、字体几何、材质 token、图标字形、hook 顺序、请求代次、`inject` 声明 |
 | `check-gate.mjs` | 行为级 | 直接 import 真 `index.js`，用假 ctx 驱动 `tools/pre-execute`，覆盖读写判定、授权、撤销、继承 |
 | `check-seat.mjs` | 规则级 | 复刻宿主 slots 的 `single` 座位规则，验证 `priority: -1` 接管与 inject 两条路径 |
+| `check-paths.mjs` | 路径级 | POSIX、Windows 和文件 URL 的路径归类与折叠 |
+| `check-grant-storage.mjs` | 行为级 | 持久化与撤销、隔离、委派继承、故障与降权 |
 
 跑法：
 
 ```bash
-npm test                  # test/run-all.mjs：七套一次跑完并汇总
+npm test                  # test/run-all.mjs：九套一次跑完并汇总
 # 或单跑一套
 node test/check-gate.mjs
 ```
 
-`check-gate.mjs` 会打印总断言数（当前 284）。`check-visual.mjs` / `check-locale.mjs` / `check-seat.mjs`
+如已安装 DSH，也可将其 `dsh-storage-domain` 和 `dsh-storage-json` 的模块入口依次传入：
+
+```text
+node test/check-grant-storage.mjs <domain-module> <json-module>
+```
+
+这一路径使用真实 JSON 后端和域路由。默认后端和独立路由各启动四个独立 Node 进程，依次验证授权写入、原对话恢复与撤销、撤销结果恢复与清空，以及清空后授权不再出现。不启动 DSH 网页，也不使用正在运行的 profile。该用例不证明所选后端已做操作系统隔离；部署前仍须检查写入边界。
+
+`0.2.1-alpha.1`、`0.2.1-rc.3` 和 `0.2.2-rc.3` 的存储组件已在 WSL2 Linux Node 和原生 Windows Node 上分别验证。Windows 测试若读不到 WSL 的 pnpm 依赖链接，可在独立测试目录中用 npm 安装同版的两个存储包，再传入其模块入口。
+
+CI 的 `grant-storage` 任务为 Linux、Windows 和 macOS 分别运行这三个版本的真实存储用例。通过矩阵只说明插件与存储组件能在对应平台的 Node 上配合工作，不是 DSH 桌面整机、实际 profile 或操作系统存储隔离的验收。
+
+`check-gate.mjs` 会打印总断言数。`check-visual.mjs` / `check-locale.mjs` / `check-seat.mjs`
 支持 `AP_CLIENT=<file>` 指定被测客户端文件，负向对照靠它；`check-seat.mjs` 用 `AP_DSH_DIR` 指向要对照的
 DSH checkout（默认 `~/.dsh-versions/0.2.1-alpha.1`）。夹具目录 `test/fixtures/` 由用例自建，已进 `.gitignore`。
 

@@ -72,7 +72,7 @@ next()  ── 放行给工具执行；写入随后仍受平台沙箱约束
 
 ## 状态存在哪里
 
-全部在 Harness 进程内存里，没有落盘：
+下表是 Harness 进程中的状态。只有在部署者确认后端受保护并启用 `grantPersistence: protected-backend` 后，前两项才通过 `storageDomain` 保存到独立域 `readwrite_gate_grants`，用 profile 目录和原对话 ID 定位。不从会话日志读取授权；子会话只读取父会话当前有效的授权，不把继承项写入自身记录。
 
 | 结构 | 键 | 值 | 生命周期 |
 |------|----|----|----------|

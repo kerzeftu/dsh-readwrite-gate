@@ -742,7 +742,7 @@ check('clear survives a re-attached agent', grantedRow(), false)
 // the parent conversation's grants instead of asking again.
 dialogAnswer = '该对话中总是可以访问'
 check('the parent grant is recorded', await verdict('workspace-access', read(`${ROOT}/../ap-parent-grant/f.txt`)), 'allow')
-const childSession = { id: 'sess-child', snapshotEvents: () => [], header: { parentSession: session.id } }
+const childSession = { id: 'sess-child', snapshotEvents: () => [], header: { origin: 'subagent', parentSession: session.id } }
 // `liveSession` resolves the parent through the plugin's own session service.
 const knownSessions = new Map([[session.id, session]])
 ctx.get = (name) => (name === 'sessions' ? { get: (id) => knownSessions.get(id) } : undefined)

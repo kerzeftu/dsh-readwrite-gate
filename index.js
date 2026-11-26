@@ -17,6 +17,7 @@
  */
 import { readFileSync, statSync, realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
+import { selectGrantStorage } from './grant-storage.js'
 import { allowListOf, allowedBy, classifyPathForm, classifyTool, containsPath, directoryOf, foldPath, isLevel, normalizeUserPath, scopeBaseOf } from './functions.js'
 
 /** Services this plugin cannot work without. */
@@ -384,21 +385,114 @@ export function apply(ctx, config = {}) {
   const fallbackLevel = resolvedConfig.defaultLevel
   const treatReadOnlyAsNoAccess = resolvedConfig.treatReadOnlyAsNoAccess
   const opaquePolicy = resolvedConfig.opaquePolicy
-  const dialogTool = 'ask_user_question'
   const questionPrefix = 'dsh-readwrite-gate/'
   /** Comment marker a dispatcher uses to declare one task's write slice. */
   const dispatchScopeMarker = 'dsh-access-scope:'
 
   /**
    * Conversation-scoped path grants, keyed `<sessionId>` then path. Each entry
-   * records the families the user answered “always” for, on that exact path; the
-   * session log is the durable record and this map is its cache.
+   * records the families the user answered “always” for, on that exact path.
+   * Only the protected storage backend may restore this map across restarts.
    */
   const liveGrants = new Map()
   /** One serialized authorization queue per session, so dialogs never stack. */
   const askQueues = new Map()
   /** Per-conversation read allowlist, keyed by session id; in-process by design. */
   const readAllow = new Map()
+  const storage = selectGrantStorage({
+    facility: ctx.get?.('storageDomain'),
+    profileDirectory: ctx.get?.('profileContext')?.dir,
+    mode: config?.grantPersistence,
+  })
+  const store = storage.store
+  const pending = new Map()
+  const loaded = new WeakMap()
+  const disposedSessions = new WeakSet()
+  const storageFaults = new Set()
+  if (store !== undefined) ctx.effect(() => () => store.close())
+
+  function serialize(session, job) {
+    const key = String(session.id)
+    const result = (pending.get(key) ?? Promise.resolve()).then(job)
+    const settled = result.then(() => undefined, () => undefined)
+    pending.set(key, settled)
+    void settled.then(() => { if (pending.get(key) === settled) pending.delete(key) })
+    return result
+  }
+
+  function hydrate(session) {
+    if (store === undefined || session === undefined) return Promise.resolve(true)
+    if (disposedSessions.has(session) || storageFaults.has(String(session.id))) return Promise.resolve(false)
+    let ready = loaded.get(session)
+    if (ready === undefined) {
+      ready = store.load(String(session.id)).then((snapshot) => {
+        if (disposedSessions.has(session)) return false
+        if (snapshot !== undefined) {
+          readAllow.set(String(session.id), snapshot.readAllow)
+          liveGrants.set(String(session.id), new Map(snapshot.grants.map(({ path, ...entry }) => [path, entry])))
+        }
+        return true
+      }).catch(() => {
+        const key = String(session.id)
+        storageFaults.add(key)
+        liveGrants.delete(key)
+        readAllow.set(key, [])
+        return false
+      })
+      loaded.set(session, ready)
+    }
+    return ready
+  }
+
+  async function prepareGrants(session) {
+    if (store === undefined || session === undefined) return
+    const owner = inheritanceRoot(session)
+    const sources = owner === session ? [session] : [owner, session]
+    await Promise.all(sources.filter(Boolean).map(async (source) => {
+      await pending.get(String(source.id))
+      await hydrate(source)
+    }))
+  }
+
+  function mutateGrants(session, mutation) {
+    return serialize(session, async () => {
+      if (!await hydrate(session)) throw new Error('Authorization storage is unavailable')
+      const key = String(session.id)
+      const previousGrants = ownGrantsOf(session)
+      const previousAllow = readAllowOf(session)
+      let snapshot
+      let entries
+      let result
+      try {
+        liveGrants.set(key, new Map([...previousGrants].map(([path, entry]) => [path, { ...entry }])))
+        result = mutation()
+        if (result?.kind === 'error') return result
+        entries = ownGrantsOf(session)
+        snapshot = {
+          version: 1,
+          readAllow: readAllowOf(session),
+          grants: [...entries].map(([path, entry]) => ({ path, ...entry, directory: entry.directory === true })),
+        }
+      } finally {
+        liveGrants.set(key, previousGrants)
+        readAllow.set(key, previousAllow)
+      }
+      try {
+        await store.save(key, snapshot)
+      } catch (error) {
+        // A failed write may have reached the backend. Do not use either
+        // snapshot in this process until an operator checks the medium.
+        storageFaults.add(key)
+        liveGrants.delete(key)
+        readAllow.set(key, [])
+        throw error
+      }
+      if (disposedSessions.has(session)) throw new Error('Authorization session was closed')
+      liveGrants.set(key, entries)
+      readAllow.set(key, snapshot.readAllow)
+      return result
+    })
+  }
 
   /**
    * Normalize the configured level table.
@@ -529,10 +623,10 @@ export function apply(ctx, config = {}) {
    */
   function inheritanceRoot(session) {
     let current = session
-    if (current?.header?.parentSession === undefined) return current
+    if (current?.header?.origin !== 'subagent' || current.header.parentSession === undefined) return current
     for (let depth = 0; depth < 16; depth += 1) {
       const parentId = current?.header?.parentSession
-      if (parentId === undefined) return current
+      if (current?.header?.origin !== 'subagent' || parentId === undefined) return current
       const parent = liveSession(parentId)
       if (parent === undefined || parent === session) return current
       current = parent
@@ -672,62 +766,27 @@ export function apply(ctx, config = {}) {
     return agent.session
   }
 
-  /**
-   * The conversation-scoped path grants of one session, seeded once from its log.
-   * @param session - the session to read.
-   * @returns the path map, keyed by path.
-   */
+  function ownGrantsOf(session) {
+    const key = String(session.id)
+    if (!liveGrants.has(key)) liveGrants.set(key, new Map())
+    return liveGrants.get(key)
+  }
+
+  // Inherited grants are a live view, never copied into a child's snapshot.
   function grantEntriesOf(session) {
     if (session === undefined) return new Map()
-    const key = String(session.id)
-    const cached = liveGrants.get(key)
-    if (cached !== undefined) return cached
-    const entries = new Map()
-    try {
-      // A delegated session also inherits the standing grants of its parent
-      // conversation: the user authorized that directory for the run, and a
-      // dispatched task is part of the same run. Own answers are folded after
-      // the inherited ones so they can only add.
-      const own = inheritanceRoot(session)
-      const sources = own === session ? [session] : [own, session]
-      for (const source of sources) {
-        // A dispatched task runs inside the run that authorized the path, so the
-        // parent's live grants are copied in. Its cache is authoritative: this
-        // plugin asks through the question service, whose answer never becomes a
-        // `tool/call` record, so a log replay cannot reproduce it.
-        const inherited = liveGrants.get(String(source.id))
-        if (inherited !== undefined) {
-          for (const [path, entry] of inherited) {
-            const target = entries.get(path) ?? { read: false, write: false }
-            target.read = target.read === true || entry.read === true
-            target.write = target.write === true || entry.write === true
-            target.directory = target.directory === true || entry.directory === true
-            entries.set(path, target)
-          }
-          continue
-        }
-        const replayed = readGrants(source, dialogTool, questionPrefix).granted
-        // The log keeps whatever spelling the dialog asked about; the row is the
-        // folded path, so a grant recorded from `a/../b` matches `b` here.
-        for (const dir of replayed.read) {
-          const path = canonicalPathOf(dir.path)
-          const entry = entries.get(path) ?? { read: false, write: false }
-          entry.read = true
-          entry.directory = entry.directory === true || dir.directory === true
-          entries.set(path, entry)
-        }
-        for (const dir of replayed.write) {
-          const path = canonicalPathOf(dir.path)
-          const entry = entries.get(path) ?? { read: false, write: false }
-          entry.write = true
-          entry.directory = entry.directory === true || dir.directory === true
-          entries.set(path, entry)
-        }
-      }
-    } catch {
-      // An unreadable log grants nothing.
+    const parent = inheritanceRoot(session)
+    const own = ownGrantsOf(session)
+    if (parent === session) return own
+    const entries = new Map(ownGrantsOf(parent))
+    for (const [path, entry] of own) {
+      const inherited = entries.get(path)
+      entries.set(path, inherited === undefined ? entry : {
+        read: entry.read || inherited.read,
+        write: entry.write || inherited.write,
+        directory: entry.directory || inherited.directory,
+      })
     }
-    liveGrants.set(key, entries)
     return entries
   }
 
@@ -740,7 +799,7 @@ export function apply(ctx, config = {}) {
    * @param options - `directory: true` marks the entries as directories on screen.
    */
   function grantPaths(session, kind, paths, options = {}) {
-    const entries = grantEntriesOf(session)
+    const entries = ownGrantsOf(session)
     for (const path of paths) {
       const entry = entries.get(path) ?? { read: false, write: false }
       entry[kind] = true
@@ -843,6 +902,8 @@ export function apply(ctx, config = {}) {
    */
   function forgetSession(session) {
     if (session === undefined) return
+    disposedSessions.add(session)
+    loaded.delete(session)
     const key = String(session.id)
     liveGrants.delete(key)
     askQueues.delete(key)
@@ -1047,7 +1108,7 @@ export function apply(ctx, config = {}) {
           id: questionId,
           header: kind === 'write' ? '请求修改授权' : '请求访问授权',
           question: `模型请求${action}工作区之外的文件，是否允许？`,
-          detail,
+          detail: store === undefined ? `${detail}\n\n额外授权仅在本次运行内有效，重启后不保留。` : detail,
           options: DIALOG_OPTIONS.map((option) => ({
             label: typeof option.label === 'function' ? option.label(kind) : option.label,
             description: typeof option.description === 'function' ? option.description(kind, dirs) : option.description,
@@ -1063,7 +1124,7 @@ export function apply(ctx, config = {}) {
       if (chosenValue === 'always') {
         // "Always" remembers the entries the user was asked about; each covers
         // itself and everything under it.
-        for (const dir of dirs) grantPaths(session, kind, [dir.path], { directory: dir.directory })
+        if (signal?.aborted) return 'deny'
         return 'allow-always'
       }
       return chosenValue === 'once' ? 'allow-once' : 'deny'
@@ -1131,10 +1192,11 @@ export function apply(ctx, config = {}) {
   }
 
   ctx.on('tools/pre-execute', async (exec, next) => {
+    if (store !== undefined) await prepareGrants(sessionOf(exec.agent))
     const classified = classify(exec.agent, exec.name, exec.arguments)
     if (classified === undefined) return next()
     const { operation, session, opaque, read, write } = classified
-    if (session === undefined) {
+    if (session === undefined || disposedSessions.has(session)) {
       return { kind: 'deny', reason: refusal(operation.kind, describe(exec.name, operation), 'unavailable') }
     }
     const resolved = resolveLevel(session)
@@ -1226,6 +1288,23 @@ export function apply(ctx, config = {}) {
           if (afterScope === 'none') {
             return { kind: 'deny', reason: refusal(side.kind, detail, 'level-scope') }
           }
+          if (outcome === 'allow-always') {
+            const record = () => {
+              if (exec.signal?.aborted) throw new Error('Authorization was cancelled')
+              const latest = resolveLevel(session)
+              const latestScope = side.kind === 'write' ? latest.definition?.writeScope : latest.definition?.readScope
+              if ((latest.definition?.level ?? latest.level) === 'none' || latestScope === 'none') {
+                throw new Error('Authorization level changed')
+              }
+              for (const dir of dirs) grantPaths(session, side.kind, [dir.path], { directory: dir.directory })
+            }
+            try {
+              if (store === undefined) record()
+              else await mutateGrants(session, record)
+            } catch {
+              return { kind: 'deny', reason: '[access: 未能保存授权] 本次操作未放行。' }
+            }
+          }
           continue
         }
         return {
@@ -1242,6 +1321,11 @@ export function apply(ctx, config = {}) {
       if (side.kind === 'read' && opaque && scope === 'workspace' && opaquePolicy === 'deny') {
         return { kind: 'deny', reason: refusal(side.kind, detail, 'unknown-paths') }
       }
+    }
+    // A dialog or a durable write can yield after either family passed.
+    // Do not execute against a permission preset that changed during that wait.
+    if (exec.signal?.aborted || disposedSessions.has(session) || resolveLevel(session).key !== resolved.key) {
+      return { kind: 'deny', reason: '[access: 授权状态已变化] 本次操作未放行，请重新发起。' }
     }
     return next()
   })
@@ -1401,7 +1485,12 @@ export function apply(ctx, config = {}) {
       // One row can be backed by the configured allowlist and the dialog grant
       // map under two spellings (with and without a trailing separator), so both
       // sides are matched by their canonical form.
-      const grants = grantEntriesOf(session)
+      const grants = ownGrantsOf(session)
+      const parent = inheritanceRoot(session)
+      if (parent !== session && [...ownGrantsOf(parent)].some(([path, entry]) =>
+        canonicalPath(path) === key && ((dropRead && entry.read) || (dropWrite && entry.write)))) {
+        return { kind: 'error', text: '此授权由原对话继承，请在原对话撤销。' }
+      }
       let grantKey
       for (const name of grants.keys()) {
         if (canonicalPath(name) === key) {
@@ -1432,8 +1521,8 @@ export function apply(ctx, config = {}) {
     }
     if (action === 'clear') {
       setReadAllow(session, [])
-      grantEntriesOf(session).clear()
-      return { kind: 'success', text: '已清空本对话的额外路径。' }
+      ownGrantsOf(session).clear()
+      return { kind: 'success', text: '已清空本对话自行添加的额外路径；继承的授权由原对话管理。' }
     }
     return { kind: 'error', text: `未知操作“${action}”；可用：list、add、remove、clear。` }
   }
@@ -1444,7 +1533,25 @@ export function apply(ctx, config = {}) {
     handler: (invocation) => {
       const session = invocation.agent?.session
       if (session === undefined) return { kind: 'error', text: '无法解析当前会话。' }
-      return allowCommand(session, invocation.rawInput)
+      const run = () => allowCommand(session, invocation.rawInput)
+      const action = String(invocation.rawInput ?? '').trim().split(/\s+/, 1)[0]?.toLowerCase()
+      if (store === undefined) {
+        const result = run()
+        return result.kind === 'success'
+          ? { ...result, text: `${result.text}\n额外授权仅在本次运行有效（未启用受保护的持久化存储）。` }
+          : result
+      }
+      if (action === '' || action === 'list') {
+        return prepareGrants(session).then(async () => {
+          const result = run()
+          return await hydrate(session) && await hydrate(inheritanceRoot(session)) ? result : {
+            ...result, text: `${result.text}\n授权存储不可读，未恢复已保存的授权。`,
+          }
+        })
+      }
+      return prepareGrants(session).then(() => mutateGrants(session, run)).catch(() => ({
+        kind: 'error', text: '无法保存授权变更；未应用本次添加或撤销。',
+      }))
     },
   })
 
@@ -1610,7 +1717,7 @@ export function apply(ctx, config = {}) {
       })
       return () => {
         dispose()
-        forget(session)
+        forgetDialog(session)
       }
     }, 'readwrite-gate level section')
   }

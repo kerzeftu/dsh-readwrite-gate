@@ -27,7 +27,7 @@ Approval prompts offer three choices: **Deny**, **Allow once**, and **Always all
 - Read approval does not automatically grant write access.
 - Persistent approval usually covers the file's containing directory, not just the individual file. It applies to the contents of that directory. Check the path shown in the prompt before approving.
 - The extra file permissions panel has separate read and write sections. Writable paths also appear in the read section. Removing a path from the read section revokes both read and write access; removing it from the write section revokes only write access.
-- Grants are kept in the current Harness process. After a restart, approval is required again.
+- By default, grants last for the current Harness process. With protected host storage enabled, the original conversation can restore standing grants and revocations after a restart.
 
 See the [authorization guide](docs/authorization.md) for details. The linked documentation is in Chinese.
 

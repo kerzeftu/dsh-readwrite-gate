@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'verify/grant-storage']
   pull_request:
 
 jobs:
@@ -15,3 +15,32 @@ jobs:
           node-version: '22'
       - run: node --version
       - run: npm test
+
+  grant-storage:
+    name: Grant storage (${{ matrix.os }}, DSH ${{ matrix.dsh }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        dsh: ['0.2.1-alpha.1', '0.2.1-rc.3', '0.2.2-rc.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test with real Harness storage packages
+        shell: pwsh
+        env:
+          DSH_VERSION: ${{ matrix.dsh }}
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'gate-storage-deps'
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          npm install --prefix $stage --registry=https://registry.npmjs.org --ignore-scripts --omit=optional --no-package-lock --no-audit --no-fund "@deepseek-ai/dsh-storage-domain@$env:DSH_VERSION" "@deepseek-ai/dsh-storage-json@$env:DSH_VERSION"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $domain = Join-Path $stage 'node_modules/@deepseek-ai/dsh-storage-domain/lib/index.js'
+          $json = Join-Path $stage 'node_modules/@deepseek-ai/dsh-storage-json/lib/index.js'
+          node test/check-grant-storage.mjs $domain $json

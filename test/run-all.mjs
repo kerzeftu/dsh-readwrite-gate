@@ -16,6 +16,7 @@ const suites = [
   'check-seat.mjs',
   'check-gate.mjs',
   'check-paths.mjs',
+  'check-grant-storage.mjs',
   'delegation.test.mjs',
 ]
 
