@@ -2,6 +2,15 @@
 
 公开仓库：<https://github.com/kerzeftu/dsh-readwrite-gate>（MIT）。
 
+## Unreleased
+
+### Added
+- 新增按原对话持久化长期授权、手动白名单和撤销的选项。默认仍使用内存；只有部署者确认 Harness 后端受保护后才启用。拒绝和“仅一次”不保存。
+- 新增 Linux、Windows、macOS 的存储兼容性测试，覆盖三个 DSH 版本及独立进程重启后的恢复与撤销。
+
+### Fixed
+- 修复 Windows 上解析不存在的授权目标时把盘根误当成盘符相对路径的问题；授权与撤销使用相同的真实路径解析。
+
 ## 1.4.1 — 2026-11-19
 
 ### Fixed

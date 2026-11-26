@@ -64,13 +64,11 @@ ss -lptn 'sport = :10714'
 
 ## 发布清单
 
-1. `node --check index.js functions.js client.js`
-2. 六套自检全绿（见 [testing.md](testing.md)）
-3. 负向对照至少跑一条（证明新断言能红）
-4. 更新 `CHANGELOG.md`；`package.json` 版本号 +1
-5. 刷新桌面副本（`cp -a 源/. 目标/`，`diff -r` 校验）
-6. `git commit`（提交信息写清“改了什么、为什么”）
-7. 告诉用户哪些改动需要重启、哪些刷新页面即可
+1. 对改动的 JavaScript 文件逐个运行 `node --check`，再运行 `npm test`。存储改动还需通过 [真实后端矩阵](testing.md)。
+2. 用负向对照确认新增断言能检出相应错误；涉及宿主安装或授权存储时，在独立 profile 按[授权存储维护](grant-storage.md)验收。
+3. 将 `CHANGELOG.md` 的未发布条目归入目标版本，并按实际变更更新 `package.json` 的版本号。合并代码不等于发版。
+4. 从独立副本生成 `.tgz`，核对运行文件清单及 SHA-256，确认标签对应打包提交，再上传 Release 附件。
+5. 发布说明写清升级步骤、哪些改动需要重启，以及是否需要重新配置或重新授权。
 
 ## 版本与提交约定
 

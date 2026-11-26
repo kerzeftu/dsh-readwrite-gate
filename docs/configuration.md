@@ -80,7 +80,7 @@ levels:
 - **复用宿主后端**：仅当现有默认后端及其配置均不在模型工具的写入权限内时，启用 `grantPersistence: protected-backend`。保留 `storage-domain` 的默认 `backend`，无需添加域路由。
 - **单独隔离**：先让宿主注册具有 `kv` 能力的受保护后端，再把 `storage-domain` 的 `routes.readwrite_gate_grants` 设为该后端的注册名。保留原有 `backend` 和其他路由，最后启用 `grantPersistence: protected-backend`。这条路由只影响司门，不移动其他 Harness 数据。
 
-司门不会自行创建隔离后端。不要仅把普通 JSON 目录换到另一个可写位置，也不要让两个独立运行的 Harness 实例同时写同一 profile 的授权记录。后端必须能原子替换同一会话的记录。无法确认这些条件时，保持默认内存模式。
+司门不会自行创建隔离后端。不要仅把普通 JSON 目录换到另一个可写位置，也不要让两个独立运行的 Harness 实例同时写同一 profile 的授权记录。后端必须能原子替换同一会话的记录。无法确认这些条件时，保持默认内存模式。部署和升级时请参照[授权存储维护](grant-storage.md)核对恢复、撤销和回滚流程。
 
 ## profile 中的重复预设配置
 
