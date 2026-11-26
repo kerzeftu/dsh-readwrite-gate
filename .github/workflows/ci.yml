@@ -44,7 +44,7 @@ jobs:
             $code = $LASTEXITCODE
             $output | ForEach-Object { Write-Host $_ }
             if ($code -ne 0) {
-              $message = "$label (exit $code): " + (($output | Select-Object -First 20) -join "`n")
+              $message = "$label (exit $code): " + (($output | Where-Object { "$_".Trim() } | Select-Object -First 30) -join "`n")
               $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
               Write-Host "::error::$message"
               exit $code

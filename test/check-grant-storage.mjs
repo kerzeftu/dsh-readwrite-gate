@@ -156,6 +156,10 @@ function host({ mode = 'protected-backend', readFails = false, writeFails = fals
   }
 }
 async function exerciseHostOnDisk(openFacility, phase) {
+  async function command(plugin, input) {
+    const result = await plugin.command(parent, input)
+    assert.equal(result.kind, 'success', `${input}: ${result.text}`)
+  }
   const phases = [
     async (plugin) => {
       plugin.answer('该对话中总是可以访问')
@@ -170,8 +174,8 @@ async function exerciseHostOnDisk(openFacility, phase) {
       assert.equal(await plugin.read(fork), 'deny')
       assert.equal(await plugin.read(parent, manualPath), 'allow')
       assert.equal(await plugin.write(parent, manualWriteDir), 'allow')
-      assert.equal((await plugin.command(parent, `remove-write "${manualWriteDir}"`)).kind, 'success')
-      assert.equal((await plugin.command(parent, `remove "${grantDir}"`)).kind, 'success')
+      await command(plugin, `remove-write "${manualWriteDir}"`)
+      await command(plugin, `remove "${grantDir}"`)
       assert.equal(await plugin.read(child), 'deny')
     },
     async (plugin) => {
