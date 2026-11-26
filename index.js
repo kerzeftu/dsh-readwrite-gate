@@ -17,6 +17,7 @@
  */
 import { readFileSync, statSync, realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { selectGrantStorage } from './grant-storage.js'
 import { allowListOf, allowedBy, classifyPathForm, classifyTool, containsPath, directoryOf, foldPath, isLevel, normalizeUserPath, scopeBaseOf } from './functions.js'
 
@@ -157,13 +158,12 @@ function canonicalPathOf(path) {
   try {
     result = realpathSync(path)
   } catch {
-    // The longest existing ancestor is resolved instead: split on either
-    // separator, because a native Windows path is written with backslashes.
-    const boundary = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
-    if (boundary > 0) {
-      const head = path.slice(0, boundary)
-      const real = canonicalPathOf(head)
-      if (real !== head) result = `${real}${path.slice(boundary)}`
+    // Preserve the filesystem root during ancestor lookup. On Windows, C:
+    // is relative to that drive's current directory, not the root C:\.
+    const parent = dirname(path)
+    if (parent !== path && isAbsolute(parent)) {
+      const real = canonicalPathOf(parent)
+      if (real !== parent) result = join(real, basename(path))
     }
   }
   canonicalCache.set(path, { value: result, at: now })
@@ -1376,19 +1376,18 @@ export function apply(ctx, config = {}) {
       const why = PATH_ERRORS[normalized.reason] ?? normalized.reason
       return { path: '', directory: false, exists: false, error: `无法识别路径“${raw}”：${why}。` }
     }
-    let path = normalized.path
     let directory = normalized.directory
     let exists = false
     try {
-      const info = statSync(path)
+      const info = statSync(normalized.path)
       exists = true
       directory = directory || info.isDirectory()
-      // Resolve symlinks, so the stored path is the real one the gate compares.
-      path = realpathSync(path)
     } catch {
-      // A target may not exist yet: a write can name a file it will create, and
-      // a user may pre-authorize a path that appears later. The lexical path stands.
+      // Users may pre-authorize targets that do not exist yet.
     }
+    // Use the same ancestor resolution as the gate so a stored path can also
+    // be revoked by its original spelling, even if the leaf does not exist.
+    const path = canonicalPathOf(normalized.path)
     return { path, directory, exists, error: '', mapped: normalized.mapped === true }
   }
 
